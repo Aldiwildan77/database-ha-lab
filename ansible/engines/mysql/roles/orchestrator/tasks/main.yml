@@ -6,20 +6,48 @@
     quiet: true
   no_log: true
 
-- name: Create orchestrator topology account
-  ansible.mysql.mysql_user:
+- name: Read super_read_only
+  ansible.mysql.mysql_query:
     login_unix_socket: /var/run/mysqld/mysqld.sock
-    name: "{{ orchestrator_user }}"
-    host: "{{ item }}"
-    plugin: caching_sha2_password
-    plugin_auth_string: "{{ mysql_admin_password }}"
-    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
-    priv: "*.*:SUPER,PROCESS,REPLICATION SLAVE,REPLICATION CLIENT,RELOAD/mysql.slave_master_info:SELECT/performance_schema.*:SELECT"
-    session_vars:
-      sql_log_bin: 0
-    state: present
-  loop: "{{ mysql_client_hosts }}"
-  no_log: true
+    query: SELECT @@GLOBAL.super_read_only AS sro
+  register: orchestrator_sro
+  changed_when: false
+
+# super_read_only blocks even sql_log_bin=0 statements on replicas, so it is lifted around the account change.
+- name: Create orchestrator account without logging it
+  vars:
+    orchestrator_was_sro: "{{ orchestrator_sro.query_result[0][0].sro | int == 1 }}"
+  block:
+    - name: Lift super_read_only temporarily
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = OFF
+      when: orchestrator_was_sro | bool
+      changed_when: false
+
+    - name: Create orchestrator topology account
+      ansible.mysql.mysql_user:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: "{{ orchestrator_user }}"
+        host: "{{ client_host }}"
+        plugin: caching_sha2_password
+        plugin_auth_string: "{{ mysql_admin_password }}"
+        salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+        priv: "*.*:SUPER,PROCESS,REPLICATION SLAVE,REPLICATION CLIENT,RELOAD/mysql.slave_master_info:SELECT/performance_schema.*:SELECT"
+        session_vars:
+          sql_log_bin: 0
+        state: present
+      loop: "{{ mysql_client_hosts }}"
+      loop_control:
+        loop_var: client_host
+      no_log: true
+  always:
+    - name: Restore super_read_only
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = ON
+      when: orchestrator_was_sro | bool
+      changed_when: false
 
 - name: Enable Percona repository
   ansible.builtin.include_role:

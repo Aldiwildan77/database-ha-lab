@@ -37,7 +37,7 @@
       - --passwords-from-stdin
       - "clusteradmin@{{ node_fqdn }}:{{ mysql_port }}"
       - -e
-      - "try { dba.getCluster().dissolve({force: true}); print('dissolved'); } catch (e) { print(e.message); }"
+      - "shell.options.useWizards = false; try { dba.getCluster().dissolve({force: true}); print('dissolved'); } catch (e) { print(e.message); }"
     stdin: "{{ mysql_admin_password }}"
   run_once: true
   no_log: true

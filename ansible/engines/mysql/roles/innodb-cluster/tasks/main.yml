@@ -11,20 +11,48 @@
     name: [mysql-shell, mysql-router]
     state: present
 
-- name: Create cluster admin account
-  ansible.mysql.mysql_user:
+- name: Read super_read_only
+  ansible.mysql.mysql_query:
     login_unix_socket: /var/run/mysqld/mysqld.sock
-    name: "{{ innodb_cluster_admin }}"
-    host: "{{ item }}"
-    plugin: caching_sha2_password
-    plugin_auth_string: "{{ mysql_admin_password }}"
-    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
-    priv: "*.*:ALL,GRANT"
-    session_vars:
-      sql_log_bin: 0
-    state: present
-  loop: "{{ mysql_client_hosts }}"
-  no_log: true
+    query: SELECT @@GLOBAL.super_read_only AS sro
+  register: ic_sro
+  changed_when: false
+
+# super_read_only blocks even sql_log_bin=0 statements on replicas, so it is lifted around the account change.
+- name: Create cluster admin without logging it
+  vars:
+    ic_was_sro: "{{ ic_sro.query_result[0][0].sro | int == 1 }}"
+  block:
+    - name: Lift super_read_only temporarily
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = OFF
+      when: ic_was_sro | bool
+      changed_when: false
+
+    - name: Create cluster admin account
+      ansible.mysql.mysql_user:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: "{{ innodb_cluster_admin }}"
+        host: "{{ client_host }}"
+        plugin: caching_sha2_password
+        plugin_auth_string: "{{ mysql_admin_password }}"
+        salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+        priv: "*.*:ALL,GRANT"
+        session_vars:
+          sql_log_bin: 0
+        state: present
+      loop: "{{ mysql_client_hosts }}"
+      loop_control:
+        loop_var: client_host
+      no_log: true
+  always:
+    - name: Restore super_read_only
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = ON
+      when: ic_was_sro | bool
+      changed_when: false
 
 # configureInstance is idempotent and persists GR prerequisites with SET PERSIST.
 - name: Configure instance for Group Replication
