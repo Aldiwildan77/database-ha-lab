@@ -33,7 +33,6 @@ SCENARIOS = ["baseline", "read-heavy", "write-heavy", "mixed-workload", "spike-t
              "failover-test", "network-disruption"]
 FAULTS = ["none", "stop-mysql", "kill-mysql", "isolate", "netem"]
 SCENARIO_FAULT = {"failover-test": "stop-mysql", "network-disruption": "netem"}
-AUTOMATIC_FAILOVER = {"orchestrator", "innodb-cluster", "percona-xtradb-cluster"}
 
 
 def now():
@@ -327,7 +326,7 @@ def main():
 
             promote_after = a.promote_after if a.promote_after is not None else float(
                 (bench.get("failover") or {}).get("manual_promotion_delay_seconds", 10))
-            manual = ctx["ha_provider"] not in AUTOMATIC_FAILOVER and fault in ("stop-mysql", "kill-mysql", "isolate")
+            manual = not ctx["auto_failover"] and fault in ("stop-mysql", "kill-mysql", "isolate")
             promoted = False
             while jm.poll() is None and now() - t_inj < a.fault_duration:
                 if manual and not a.no_promote and not promoted and events.has("primary_unavailable"):

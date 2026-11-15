@@ -35,7 +35,7 @@
       vars:
         replication_primary: "{{ rc_primary }}"
       when:
-        - ha_provider in ['async-replication', 'semi-sync', 'orchestrator']
+        - lab_ha_strategy.family == 'replication'
         - inventory_hostname == node
         - rc_primary != ''
 
@@ -55,7 +55,7 @@
       changed_when: "'rejoined' in rc_gr.stdout"
       no_log: true
       when:
-        - ha_provider == 'innodb-cluster'
+        - lab_ha_strategy.family == 'group'
         - inventory_hostname == node
         - rc_primary != ''
 

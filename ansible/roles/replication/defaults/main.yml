@@ -2,7 +2,7 @@
 replication_socket: /var/run/mysqld/mysqld.sock
 replication_user: repl
 replication_ssl: "{{ (lab_ha.replication | default({})).ssl | default(true) }}"
-replication_semi_sync: "{{ ha_provider == 'semi-sync' }}"
+replication_semi_sync: "{{ lab_ha_strategy.semi_sync | default(false) }}"
 # Primary for the initial build; failover.yml passes the current primary instead.
 replication_primary: "{{ groups['role_primary'][0] }}"
 

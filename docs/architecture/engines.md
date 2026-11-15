@@ -9,7 +9,9 @@ Status: step 1 and part of step 2 are implemented (see "Implemented" below). Rol
 - `provision.yml`, `deploy-ha.yml`, `destroy-ha.yml` and `check-host.yml` read the descriptor instead of hard-coded MySQL names and `ha_provider` conditions.
 - Behavior check: for all 5 MySQL strategies the mesh ports, client ports and minimum node counts match the previous hard-coded values.
 
-Still hard-coded: `DEFAULT_PORTS`/`resolve_ports` in `lab_config.py`, the `ha_provider` conditions in `failover.yml`, `recover.yml` and `ha-health.yml`, `mysql_*` variable names, collectors, JMeter and the benchmark runner.
+- Strategy traits in the descriptor (`family`, `failover`, `semi_sync`) replace the `ha_provider` name checks in `ha-health.yml`, `failover.yml`, `recover.yml`, the replication role and the benchmark context. The runner reads `auto_failover` from `context.json`.
+
+Still hard-coded: `DEFAULT_PORTS`/`resolve_ports` in `lab_config.py`, `mysql_*` variable names, the collectors, JMeter, and the roles' location under `ansible/roles/`.
 
 ## Goal
 

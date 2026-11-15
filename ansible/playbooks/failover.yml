@@ -51,7 +51,7 @@
   tasks:
     - name: Skip for providers with built-in failover
       ansible.builtin.meta: end_play
-      when: ha_provider not in ['async-replication', 'semi-sync']
+      when: lab_ha_strategy.failover != 'manual'
 
     - name: Check preconditions
       ansible.builtin.assert:
@@ -211,7 +211,7 @@
   tasks:
     - name: Skip other providers
       ansible.builtin.meta: end_play
-      when: ha_provider not in ['orchestrator', 'innodb-cluster']
+      when: lab_ha_strategy.failover not in ['orchestrator', 'group']
 
     - name: Orchestrator graceful takeover
       ansible.builtin.command:
@@ -226,7 +226,7 @@
       run_once: true
       delegate_to: "{{ (ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('mysql_up') | rejectattr('read_only') | map(attribute='node') | first) }}"
       changed_when: true
-      when: ha_provider == 'orchestrator' and failover_mode == 'switchover'
+      when: lab_ha_strategy.failover == 'orchestrator' and failover_mode == 'switchover'
 
     - name: InnoDB Cluster set primary
       ansible.builtin.command:
@@ -241,7 +241,7 @@
       no_log: true
       run_once: true
       changed_when: true
-      when: ha_provider == 'innodb-cluster' and failover_mode == 'switchover'
+      when: lab_ha_strategy.failover == 'group' and failover_mode == 'switchover'
 
     - name: Wait for automatic promotion
       ansible.builtin.pause:

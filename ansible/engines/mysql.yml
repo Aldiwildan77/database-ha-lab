@@ -24,11 +24,15 @@ conflicting_packages:
   percona-xtradb-cluster: [mariadb-server, mariadb-server-core, percona-server-server, mysql-community-server, mysql-server-8.0, mysql-server-core-8.0]
 
 # HA strategies this engine supports.
+#   family:    replication (source/replica), group (Group Replication) or galera (wsrep)
+#   failover:  who promotes after a failure: manual (make failover), orchestrator, group or galera
 #   provision: roles run by make provision on every node (include_role entries)
 #   deploy:    roles run by make ha, in order
 #   even_nodes_warning: an even node count does not improve quorum tolerance
 ha:
   async-replication:
+    family: replication
+    failover: manual
     min_nodes: 2
     max_nodes: null
     mesh_ports: [mysql]
@@ -36,6 +40,9 @@ ha:
     provision: [{role: mysql}]
     deploy: [{role: replication}]
   semi-sync:
+    family: replication
+    failover: manual
+    semi_sync: true
     min_nodes: 2
     max_nodes: null
     mesh_ports: [mysql]
@@ -43,6 +50,8 @@ ha:
     provision: [{role: mysql}]
     deploy: [{role: replication}]
   orchestrator:
+    family: replication
+    failover: orchestrator
     min_nodes: 3
     max_nodes: null
     even_nodes_warning: true
@@ -51,6 +60,8 @@ ha:
     provision: [{role: mysql}]
     deploy: [{role: replication}, {role: orchestrator}]
   innodb-cluster:
+    family: group
+    failover: group
     min_nodes: 3
     max_nodes: 9
     even_nodes_warning: true
@@ -62,6 +73,8 @@ ha:
     provision: [{role: mysql}]
     deploy: [{role: innodb-cluster}]
   percona-xtradb-cluster:
+    family: galera
+    failover: galera
     min_nodes: 3
     max_nodes: null
     even_nodes_warning: true

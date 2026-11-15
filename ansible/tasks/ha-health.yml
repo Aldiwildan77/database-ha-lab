@@ -31,7 +31,7 @@
          | selectattr('replica.io_state', 'equalto', 'ON')
          | selectattr('replica.sql_state', 'equalto', 'ON') | map(attribute='node') | list }}
   run_once: true
-  when: ha_provider in ['async-replication', 'semi-sync', 'orchestrator']
+  when: lab_ha_strategy.family == 'replication'
 
 - name: Check semi-sync is active on the primary
   ansible.builtin.debug:
@@ -39,7 +39,7 @@
       {{ 'semi-sync active' if hostvars[lab_writable[0]].lab_topo.status.rpl_semi_sync_source_status | default('OFF') == 'ON'
          else 'WARNING: semi-sync is OFF on the primary (no semi-sync replica connected, or the timeout fell back to async)' }}
   run_once: true
-  when: ha_provider == 'semi-sync' and lab_writable | length == 1
+  when: lab_ha_strategy.semi_sync | default(false) and lab_writable | length == 1
 
 - name: Check Group Replication membership
   ansible.builtin.assert:
@@ -52,7 +52,7 @@
   vars:
     lab_gr: "{{ (lab_topo_all | selectattr('mysql_up') | map(attribute='group') | list | first) | default([]) }}"
   run_once: true
-  when: ha_provider == 'innodb-cluster'
+  when: lab_ha_strategy.family == 'group'
 
 - name: Check Galera cluster state
   ansible.builtin.assert:
@@ -64,4 +64,4 @@
     fail_msg: "Unhealthy Percona XtraDB Cluster. down={{ lab_down }} status={{ lab_topo_all | map(attribute='status') | list }}"
     quiet: true
   run_once: true
-  when: ha_provider == 'percona-xtradb-cluster'
+  when: lab_ha_strategy.family == 'galera'
