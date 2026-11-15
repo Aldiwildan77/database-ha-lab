@@ -11,7 +11,7 @@ A lab for deploying, monitoring, benchmarking and comparing MySQL high-availabil
  ┌──────────────────────────────┐                 ┌───────────────────────┐
  │ Ansible ── provision ────────┼── SSH ─────────▶│ MySQL 8.4             │
  │ Prometheus ── scrape ────────┼── :19100/:19104▶│ node / mysqld exporter│  x N, any DC
- │ Grafana (dashboards)         │                 │ chrony, ufw           │
+ │ Grafana (dashboards)         │                 │ chrony, nftables      │
  │ JMeter ──────────────────────┼── :13306 ──────▶│ lab collector, probe  │
  └──────────────────────────────┘                 └───────────────────────┘
 ```
