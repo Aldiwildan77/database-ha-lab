@@ -12,7 +12,7 @@
 - name: Host impact check (read-only; stops on conflicts)
   ansible.builtin.import_playbook: check-host.yml
 
-- name: Provision MySQL nodes
+- name: Provision database nodes
   hosts: mysql_nodes
   gather_facts: false
   become: true
@@ -24,21 +24,13 @@
   roles:
     - common
   tasks:
-    - name: Install Oracle MySQL
+    - name: Install database engine for the selected layout
       ansible.builtin.include_role:
-        name: mysql
-      when: ha_provider != 'percona-xtradb-cluster'
-
-    - name: Install Percona XtraDB Cluster
-      ansible.builtin.include_role:
-        name: percona-xtradb-cluster
-      when: ha_provider == 'percona-xtradb-cluster'
-
-    - name: Form Percona XtraDB Cluster
-      ansible.builtin.include_role:
-        name: percona-xtradb-cluster
-        tasks_from: cluster
-      when: ha_provider == 'percona-xtradb-cluster'
+        name: "{{ item.role }}"
+        tasks_from: "{{ item.tasks_from | default('main') }}"
+      loop: "{{ lab_ha_strategy.provision }}"
+      loop_control:
+        label: "{{ item.role }}:{{ item.tasks_from | default('main') }}"
 
 - name: Install exporters
   ansible.builtin.import_playbook: configure-exporters.yml

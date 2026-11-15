@@ -17,7 +17,7 @@
 
     - name: Read deployed provider marker
       ansible.builtin.slurp:
-        src: /etc/mysql/.ha-lab-provider
+        src: "{{ lab_engine.marker_dir }}/.ha-lab-provider"
       register: deployed_provider
       failed_when: false
 
@@ -32,7 +32,7 @@
 
     - name: Require provisioned nodes
       ansible.builtin.stat:
-        path: /etc/mysql/.ha-lab-managed
+        path: "{{ lab_engine.marker_dir }}/.ha-lab-managed"
       register: provisioned
       failed_when: not provisioned.stat.exists
 
@@ -54,30 +54,17 @@
         tasks_from: firewall
       when: lab_monitoring.firewall.manage | default(true) | bool
 
-    - name: Async or semi-sync replication
+    - name: Deploy {{ ha_provider }}
       ansible.builtin.include_role:
-        name: replication
-      when: ha_provider in ['async-replication', 'semi-sync', 'orchestrator']
-
-    - name: Orchestrator
-      ansible.builtin.include_role:
-        name: orchestrator
-      when: ha_provider == 'orchestrator'
-
-    - name: InnoDB Cluster
-      ansible.builtin.include_role:
-        name: innodb-cluster
-      when: ha_provider == 'innodb-cluster'
-
-    - name: Percona XtraDB Cluster
-      ansible.builtin.include_role:
-        name: percona-xtradb-cluster
-        tasks_from: cluster
-      when: ha_provider == 'percona-xtradb-cluster'
+        name: "{{ item.role }}"
+        tasks_from: "{{ item.tasks_from | default('main') }}"
+      loop: "{{ lab_ha_strategy.deploy }}"
+      loop_control:
+        label: "{{ item.role }}:{{ item.tasks_from | default('main') }}"
 
     - name: Record deployed provider
       ansible.builtin.copy:
-        dest: /etc/mysql/.ha-lab-provider
+        dest: "{{ lab_engine.marker_dir }}/.ha-lab-provider"
         content: "{{ ha_provider }}\n"
         mode: "0644"
 

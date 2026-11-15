@@ -33,14 +33,7 @@ import re
 from ansible.errors import AnsibleParserError
 from ansible.plugins.inventory import BaseInventoryPlugin
 
-HA_PROVIDERS = {
-    # provider: (minimum nodes, maximum nodes or None, phase status)
-    "async-replication": (2, None),
-    "orchestrator": (3, None),
-    "semi-sync": (2, None),
-    "innodb-cluster": (3, 9),
-    "percona-xtradb-cluster": (3, None),
-}
+DEFAULT_ENGINE = "mysql"
 # Lab defaults deliberately differ from each product's standard port (3306, 9100, 9104, 3000, 6446,
 # 4567 ...) so the lab never collides with an existing installation on the same host.
 DEFAULT_PORTS = {
@@ -57,7 +50,6 @@ DEFAULT_PORTS = {
     "iperf": 15201,
 }
 NODE_ROLES = {"primary", "replica"}
-MYSQL_VERSIONS = {"8.0", "8.4"}
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?$")
@@ -124,6 +116,12 @@ def resolve_ports(ha: dict, mon: dict) -> dict:
     }
 
 
+def port_value(token: str, ports: dict) -> int:
+    """Engine descriptors name ports ('mysql', 'router_rw+1'); resolve against the effective lab ports."""
+    name, _, plus = str(token).partition("+")
+    return int(ports[name]) + (int(plus) if plus else 0)
+
+
 def group_safe(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", value)
 
@@ -163,8 +161,11 @@ class InventoryModule(BaseInventoryPlugin):
 
         errors: list[str] = []
         warnings: list[str] = []
+        engines = self._engines(lab_root)
+        engine_name = ha.get("db_engine", DEFAULT_ENGINE)
+        engine = engines.get(engine_name)
         networks = self._networks(inv, errors)
-        nodes = self._validate(inv, ha, mon, networks, errors, warnings)
+        nodes = self._validate(inv, ha, mon, networks, engines, engine_name, errors, warnings)
         if errors:
             msg = "\n  - ".join(errors)
             raise AnsibleParserError(f"lab_config: configuration is invalid:\n  - {msg}")
@@ -183,19 +184,17 @@ class InventoryModule(BaseInventoryPlugin):
         client_hosts = sorted({h for h in (mysql_host_pattern(c) for c in client_cidrs) if h})
 
         provider = ha["ha_provider"]
+        strategy = engine["ha"][provider]
         router = (ha.get("innodb_cluster") or {}).get("router") or {}
         ports = {k: int(v) for k, v in resolve_ports(ha, mon).items()}
         mysql_port = ports["mysql"]
-        mesh_ports = {
-            "async-replication": [mysql_port],
-            "semi-sync": [mysql_port],
-            "orchestrator": [mysql_port, ports["orchestrator_http"], ports["orchestrator_raft"]],
-            "innodb-cluster": [mysql_port],
-            "percona-xtradb-cluster": [mysql_port, ports["pxc_sst"], ports["pxc_gcomm"], ports["pxc_ist"]],
-        }[provider]
-        client_ports = [mysql_port]
-        if provider == "innodb-cluster" and router.get("enabled", True):
-            client_ports += [ports["router_rw"], ports["router_rw"] + 1]
+        mesh_ports = [port_value(t, ports) for t in strategy["mesh_ports"]]
+        client_ports = [port_value(t, ports) for t in strategy["client_ports"]]
+        optional = strategy.get("optional_client_ports")
+        if optional:
+            section = ha.get(provider.replace("-", "_")) or {}
+            if (section.get(optional["feature"]) or {}).get("enabled", True):
+                client_ports += [port_value(t, ports) for t in optional["ports"]]
         monitoring_ports = [ports["node_exporter"], ports["mysql_exporter"], ports["lab_collector"]]
 
         self.inventory.add_group("mysql_nodes")
@@ -208,14 +207,17 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_mixed_networks": len(used) > 1,
             "lab_unencrypted_networks": sorted(n for n in used if not networks[n]["encrypted"]),
             "lab_allowed_sources": client_cidrs,
-            "lab_ha_min_nodes": HA_PROVIDERS[provider][0],
+            "db_engine": engine_name,
+            "lab_engine": engine,
+            "lab_ha_strategy": strategy,
+            "lab_ha_min_nodes": strategy["min_nodes"],
             "lab_mesh_tcp_ports": mesh_ports,
             "lab_mesh_udp_ports": [],
             "lab_client_tcp_ports": client_ports,
             "lab_monitoring_tcp_ports": monitoring_ports if bool(ha_mon.get("enabled", True)) else [],
             "mysql_client_hosts": client_hosts,
             "ha_provider": ha["ha_provider"],
-            "mysql_version": str(mysql.get("version", "8.4")),
+            "mysql_version": str(mysql.get("version", engine["default_version"])),
             "mysql_port": mysql_port,
             "lab_ports": ports,
             "orchestrator_http_port": ports["orchestrator_http"],
@@ -282,6 +284,21 @@ class InventoryModule(BaseInventoryPlugin):
                 self.inventory.set_variable(name, k, v)
 
     # ------------------------------------------------------------------ #
+    def _engines(self, lab_root):
+        """Engine descriptors from ansible/engines/*.yml, keyed by name."""
+        edir = os.path.join(lab_root, "ansible", "engines")
+        out = {}
+        if not os.path.isdir(edir):
+            raise AnsibleParserError(f"lab_config: engine descriptors missing: {edir}")
+        for fname in sorted(os.listdir(edir)):
+            if not fname.endswith(".yml"):
+                continue
+            data = self.loader.load_from_file(os.path.join(edir, fname), cache="none")
+            if not isinstance(data, dict) or not data.get("name") or not isinstance(data.get("ha"), dict):
+                raise AnsibleParserError(f"lab_config: {fname} is not a valid engine descriptor (name and ha required)")
+            out[data["name"]] = data
+        return out
+
     def _networks(self, inv, errors):
         raw = inv.get("networks")
         if raw is None:
@@ -317,7 +334,7 @@ class InventoryModule(BaseInventoryPlugin):
             out[str(name)] = {"type": ntype, "interface": iface, "cidrs": cidrs, "encrypted": bool(enc)}
         return out
 
-    def _validate(self, inv, ha, mon, networks, errors, warnings):
+    def _validate(self, inv, ha, mon, networks, engines, engine_name, errors, warnings):
         env = inv.get("environment")
         if not isinstance(env, dict) or not env.get("name"):
             errors.append("inventory.yml: environment.name is required")
@@ -413,11 +430,16 @@ class InventoryModule(BaseInventoryPlugin):
             if node.get("ssh") is not None and not isinstance(node.get("ssh"), dict):
                 errors.append(f"{where}: ssh overrides must be a mapping")
 
+        engine = engines.get(engine_name)
         provider = ha.get("ha_provider")
-        if provider not in HA_PROVIDERS:
-            errors.append(f"ha.yml: ha_provider '{provider}' must be one of {sorted(HA_PROVIDERS)}")
+        if engine is None:
+            errors.append(f"ha.yml: db_engine '{engine_name}' must be one of {sorted(engines)}")
+        elif provider not in engine["ha"]:
+            errors.append(f"ha.yml: ha_provider '{provider}' is not supported by {engine_name}; "
+                          f"choose one of {sorted(engine['ha'])}")
         else:
-            lo, hi = HA_PROVIDERS[provider]
+            strategy = engine["ha"][provider]
+            lo, hi = strategy["min_nodes"], strategy.get("max_nodes")
             n = len(nodes)
             if n < lo:
                 warnings.append(f"{provider} needs at least {lo} nodes, inventory has {n}: provisioning, monitoring "
@@ -430,7 +452,7 @@ class InventoryModule(BaseInventoryPlugin):
                     f"inventory.yml: exactly one node must have role 'primary' "
                     f"(initial primary / bootstrap node), found {len(primaries)}"
                 )
-            if provider in ("innodb-cluster", "percona-xtradb-cluster", "orchestrator") and n % 2 == 0:
+            if strategy.get("even_nodes_warning") and n % 2 == 0:
                 warnings.append(f"{provider} with an even node count ({n}) does not improve quorum tolerance")
 
         used = {n.get("_network") for n in nodes if isinstance(n, dict) and n.get("_network") in networks}
@@ -452,8 +474,9 @@ class InventoryModule(BaseInventoryPlugin):
         ratio = mysql.get("buffer_pool_ratio", 0.5)
         if not isinstance(ratio, (int, float)) or not (0.05 <= float(ratio) <= 0.9):
             errors.append("ha.yml: mysql.buffer_pool_ratio must be a number between 0.05 and 0.9")
-        if str(mysql.get("version", "8.4")) not in MYSQL_VERSIONS:
-            errors.append(f"ha.yml: mysql.version must be one of {sorted(MYSQL_VERSIONS)}")
+        versions = (engine or {}).get("versions") or []
+        if versions and str(mysql.get("version", engine["default_version"])) not in versions:
+            errors.append(f"ha.yml: mysql.version must be one of {versions}")
         ports = resolve_ports(ha, mon)
         for k, v in ports.items():
             if not isinstance(v, int) or isinstance(v, bool) or not (1024 <= v <= 65534):

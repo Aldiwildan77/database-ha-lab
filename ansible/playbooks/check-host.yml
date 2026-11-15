@@ -8,11 +8,9 @@
   become: true
   vars:
     lab_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports + lab_monitoring_tcp_ports) | map('int') | unique | sort }}"
-    lab_processes: [mysqld, node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
-    pxc: "{{ ha_provider == 'percona-xtradb-cluster' }}"
-    conflicting_packages: >-
-      {{ ['mariadb-server', 'mariadb-server-core', 'percona-server-server', 'percona-xtradb-cluster', 'mysql-server-8.0', 'mysql-server-core-8.0']
-         if not pxc else ['mariadb-server', 'mariadb-server-core', 'percona-server-server', 'mysql-community-server', 'mysql-server-8.0', 'mysql-server-core-8.0'] }}
+    lab_processes: "{{ lab_engine.process_names + lab_engine.helper_processes }}"
+    conflicting_packages: "{{ lab_engine.conflicting_packages[ha_provider] | default(lab_engine.conflicting_packages.default) }}"
+    engine_packages: "{{ lab_engine.packages[ha_provider] | default(lab_engine.packages.default) }}"
     other_time_daemons: [ntp, ntpsec, openntpd]
     buffer_ratio: "{{ (lab_ha.mysql | default({})).buffer_pool_ratio | default(0.5) | float }}"
   tasks:
@@ -37,7 +35,7 @@
     - name: Read lab ownership markers
       ansible.builtin.stat:
         path: "{{ item }}"
-      loop: [/etc/mysql/.ha-lab-managed, /etc/systemd/system/node_exporter.service]
+      loop: ["{{ lab_engine.marker_dir }}/.ha-lab-managed", /etc/systemd/system/node_exporter.service]
       register: host_markers
 
     - name: Read available memory
@@ -89,20 +87,20 @@
           os: "{{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }}"
           memory_available_mb: "{{ host_memavail.stdout | int }}"
           mysql_buffer_pool_mb: "{{ host_planned_pool_mb }}"
-          apt_repository: "{{ 'repo.percona.com (' ~ ha_provider ~ ')' if pxc else 'repo.mysql.com (pinned to mysql-* packages only)' }}"
+          apt_repository: "{{ lab_engine.apt_repository[ha_provider] | default(lab_engine.apt_repository.default) }}"
           packages_to_install: >-
             {{ (['ca-certificates', 'curl', 'gnupg', 'python3-debian', 'python3-pymysql', 'nftables', 'iperf3', 'mtr-tiny',
                  'iputils-ping', 'sysstat', 'jq']
                 + ([] if other_time_daemons | select('in', host_packages) | list else ['chrony'])
                 + (['ufw'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'ufw' else [])
-                + (['percona-xtradb-cluster'] if pxc else ['mysql-server', 'mysql-client']))
+                + engine_packages)
                | reject('in', host_packages) | list }}
           time_sync: >-
             {{ 'keep existing ' ~ (other_time_daemons | select('in', host_packages) | join(', '))
                if other_time_daemons | select('in', host_packages) | list
                else 'chrony (replaces systemd-timesyncd if present)' }}
           services_added: >-
-            {{ ['mysql', 'node_exporter', 'mysqld_exporter', 'ha-lab-collector', 'ha-lab-network-probe.timer']
+            {{ [lab_engine.service, 'node_exporter', 'mysqld_exporter', 'ha-lab-collector', 'ha-lab-network-probe.timer']
                + (['halab-firewall'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'nftables' else []) }}
           system_users_added: [node_exporter, mysqld_exporter]
           paths_written: [/etc/mysql/mysql.conf.d/zz-ha-lab.cnf, /etc/ha-lab, /etc/halab, /opt/ha-lab, /opt/node_exporter-*, /opt/mysqld_exporter-*, /var/lib/node_exporter/textfile]

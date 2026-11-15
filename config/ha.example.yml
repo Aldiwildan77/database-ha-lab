@@ -1,4 +1,7 @@
 ---
+# Database engine. Each engine is a descriptor in ansible/engines/<name>.yml. Only mysql exists today.
+db_engine: mysql
+
 # async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
 # Provisioning installs the server packages; `make ha` builds the topology.
 # percona-xtradb-cluster installs Percona packages instead of Oracle MySQL and forms the cluster during provisioning.

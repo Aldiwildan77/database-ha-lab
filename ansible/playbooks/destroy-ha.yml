@@ -22,7 +22,7 @@
   tasks:
     - name: Read deployed provider
       ansible.builtin.slurp:
-        src: /etc/mysql/.ha-lab-provider
+        src: "{{ lab_engine.marker_dir }}/.ha-lab-provider"
       register: deployed
       failed_when: false
 
@@ -122,7 +122,7 @@
 
     - name: Remove provider marker
       ansible.builtin.file:
-        path: /etc/mysql/.ha-lab-provider
+        path: "{{ lab_engine.marker_dir }}/.ha-lab-provider"
         state: absent
 
 - name: Purge MySQL and data (destroy_data=true)

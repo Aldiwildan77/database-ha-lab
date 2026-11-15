@@ -1,6 +1,15 @@
 # Multiple database engines and HA strategies
 
-Status: design proposal. Nothing here is implemented yet.
+Status: step 1 and part of step 2 are implemented (see "Implemented" below). Roles are not moved yet, and no second engine exists.
+
+## Implemented
+
+- `ansible/engines/<name>.yml` is the engine descriptor. `mysql.yml` holds, per HA strategy, the node limits, mesh and client ports, and the roles that provision and deploy it. It also holds packages, conflicting packages, process names, service name and the marker directory.
+- `lab_config.py` loads every descriptor, reads `db_engine` from `ha.yml` (default `mysql`) and validates the engine and strategy pair. It exposes `db_engine`, `lab_engine` and `lab_ha_strategy`.
+- `provision.yml`, `deploy-ha.yml`, `destroy-ha.yml` and `check-host.yml` read the descriptor instead of hard-coded MySQL names and `ha_provider` conditions.
+- Behavior check: for all 5 MySQL strategies the mesh ports, client ports and minimum node counts match the previous hard-coded values.
+
+Still hard-coded: `DEFAULT_PORTS`/`resolve_ports` in `lab_config.py`, the `ha_provider` conditions in `failover.yml`, `recover.yml` and `ha-health.yml`, `mysql_*` variable names, collectors, JMeter and the benchmark runner.
 
 ## Goal
 

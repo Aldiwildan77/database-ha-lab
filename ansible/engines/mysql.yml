@@ -1,0 +1,71 @@
+---
+# Engine descriptor: everything the lab core needs to know about a database engine.
+# The core (inventory plugin, provision, deploy-ha, check-host) reads only this file and the roles
+# it names, so a new engine is a new descriptor plus its roles.
+#
+# Port names resolve through lab_ports (config value or lab default). "name+1" is that port plus one.
+name: mysql
+display: MySQL
+config_section: mysql            # ha.yml section for engine settings
+versions: ["8.0", "8.4"]
+default_version: "8.4"
+service: mysql
+process_names: [mysqld]
+helper_processes: [node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
+marker_dir: /etc/mysql           # .ha-lab-managed and .ha-lab-provider live here
+packages:
+  default: [mysql-server, mysql-client]
+  percona-xtradb-cluster: [percona-xtradb-cluster]
+apt_repository:
+  default: repo.mysql.com (pinned to mysql-* packages only)
+  percona-xtradb-cluster: repo.percona.com
+conflicting_packages:
+  default: [mariadb-server, mariadb-server-core, percona-server-server, percona-xtradb-cluster, mysql-server-8.0, mysql-server-core-8.0]
+  percona-xtradb-cluster: [mariadb-server, mariadb-server-core, percona-server-server, mysql-community-server, mysql-server-8.0, mysql-server-core-8.0]
+
+# HA strategies this engine supports.
+#   provision: roles run by make provision on every node (include_role entries)
+#   deploy:    roles run by make ha, in order
+#   even_nodes_warning: an even node count does not improve quorum tolerance
+ha:
+  async-replication:
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}]
+  semi-sync:
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}]
+  orchestrator:
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mysql, orchestrator_http, orchestrator_raft]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}, {role: orchestrator}]
+  innodb-cluster:
+    min_nodes: 3
+    max_nodes: 9
+    even_nodes_warning: true
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    optional_client_ports:
+      feature: router
+      ports: [router_rw, router_rw+1]
+    provision: [{role: mysql}]
+    deploy: [{role: innodb-cluster}]
+  percona-xtradb-cluster:
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mysql, pxc_sst, pxc_gcomm, pxc_ist]
+    client_ports: [mysql]
+    provision: [{role: percona-xtradb-cluster}, {role: percona-xtradb-cluster, tasks_from: cluster}]
+    deploy: [{role: percona-xtradb-cluster, tasks_from: cluster}]
