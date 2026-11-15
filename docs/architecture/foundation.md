@@ -9,7 +9,7 @@
 | MySQL packages | Oracle APT repo (`mysql-8.4-lts` / `mysql-8.0`), pinned with priority 1001 | 8.4 LTS is not in the Ubuntu/Debian archives; MySQL Shell and Router (InnoDB Cluster) come from the same repo |
 | MariaDB packages | deb.mariadb.org, pinned to `mariadb-*` packages only | Distribution archives lag the LTS series |
 | PostgreSQL packages | apt.postgresql.org (PGDG); one cluster named `halab` per node | Every supported major version on every OS; other clusters on the host are never touched |
-| Root access | MySQL/MariaDB: `root@localhost` keeps `auth_socket`. PostgreSQL: peer auth as `postgres` | No database root password to manage or leak |
+| Root access | MySQL: `root@localhost` keeps `auth_socket`; MariaDB: `unix_socket`. PostgreSQL: peer auth as `postgres` | No database root password to manage or leak |
 | Node-local accounts | MySQL/MariaDB: created with `sql_log_bin=0`. PostgreSQL: created on the primary only | Prevents errant GTIDs; standbys get roles through replication |
 | Server defaults | MySQL/MariaDB: GTID on, `sync_binlog=1`, `innodb_flush_log_at_trx_commit=1`. PostgreSQL: `synchronous_commit=on`, `wal_log_hints=on` | Durable baseline shared by every strategy of an engine so comparisons start from the same settings |
 | Exporters | Official release binaries, SHA-256 verified, systemd with hardening | No third-party packages; versions pinned in `config/monitoring.yml` |

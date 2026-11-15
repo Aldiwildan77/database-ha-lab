@@ -339,7 +339,7 @@
     },
     {
       "type": "timeseries",
-      "title": "TCP connect to MySQL p50",
+      "title": "TCP connect to database p50",
       "id": 8,
       "datasource": {
         "type": "prometheus",

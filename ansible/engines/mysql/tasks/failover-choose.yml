@@ -56,11 +56,13 @@
   register: fo_cmp
   when: inventory_hostname in candidates
 
+# A candidate whose wait timed out (1) has not applied everything; in a switchover it may lack the fenced
+# primary's last transactions even when it matches the other candidates.
 - name: Choose new primary
   ansible.builtin.set_fact:
     fo_new_primary: >-
       {%- set ok = [] -%}
-      {%- for c in candidates -%}
+      {%- for c in candidates if (hostvars[c].fo_wait.query_result[0][0].timed_out | default(1) | int) == 0 -%}
       {%- if (hostvars[c].fo_cmp.results | default([]) | map(attribute='query_result') | map('first') | map('first')
               | map(attribute='s') | map('int') | reject('equalto', 1) | list | length) == 0 -%}
       {%- set _ = ok.append(c) -%}
@@ -73,8 +75,8 @@
   ansible.builtin.assert:
     that: fo_new_primary != ''
     fail_msg: >-
-      No candidate contains every transaction the others have
-      {{ ('(requested ' ~ new_primary ~ ' is behind another replica)') if new_primary | default('') else '' }}.
+      No candidate applied everything within {{ apply_timeout | default(120) }} s and contains every transaction the others have
+      {{ ('(requested ' ~ new_primary ~ ' is behind or still applying)') if new_primary | default('') else '' }}.
       GTID sets: {{ dict(candidates | zip(candidates | map('extract', hostvars, 'fo_gtid') | map(attribute='query_result') | map('first') | map('first') | map(attribute='g'))) }}
     quiet: true
   run_once: true

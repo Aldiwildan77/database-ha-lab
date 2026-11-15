@@ -8,6 +8,7 @@ versions: ["16", "17", "18"]
 default_version: "17"
 architectures: [x86_64, aarch64]
 service: postgresql
+service_unit: postgresql@{version}-halab.service   # the cluster unit; {version} is replaced with db_version
 process_names: [postgres]
 helper_processes: [node_exporter, postgres_exporter, python3, patroni, etcd]
 marker_dir: /etc/postgresql
@@ -20,7 +21,6 @@ exporter:
 collector:
   module: engine_postgres
   run_as: postgres_exporter
-  after: postgresql.service
   connect: {user: exporter, host: /var/run/postgresql}
 ansible_collections: [community.postgresql]
 ports:

@@ -779,7 +779,7 @@
           "sort": "desc"
         }
       },
-      "description": "InnoDB row lock wait seconds accumulated per second (millisecond resolution). Mean only."
+      "description": "Row lock wait seconds accumulated per second (MySQL/MariaDB: Innodb_row_lock_time, millisecond resolution). Mean only."
     }
   ]
 }

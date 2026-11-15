@@ -28,7 +28,7 @@ def main():
     except (OSError, ValueError):
         state = {}
     rtt = promlib.Histogram("network_rtt_seconds", "ICMP round-trip time to peer.", RTT_BUCKETS)
-    tcp = promlib.Histogram("tcp_connect_duration_seconds", "TCP handshake time to peer MySQL port.", RTT_BUCKETS)
+    tcp = promlib.Histogram("tcp_connect_duration_seconds", "TCP handshake time to peer database port.", RTT_BUCKETS)
     sent = promlib.Counter("network_probe_packets_sent_total", "ICMP probes sent.")
     lost = promlib.Counter("network_probe_packets_lost_total", "ICMP probes without reply.")
     rtt.load(state.get("rtt"))

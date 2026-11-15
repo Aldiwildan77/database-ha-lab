@@ -1,0 +1,4 @@
+---
+# systemd unit that runs the database server, from the engine descriptor.
+lab_db_service_unit: >-
+  {{ (lab_engine.service_unit | default(lab_engine.service ~ '.service')) | replace('{version}', db_version | string) }}

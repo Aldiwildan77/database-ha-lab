@@ -45,6 +45,44 @@
     state: present
     update_cache: "{{ mariadb_repo.changed }}"
 
+- name: Create TLS directory
+  ansible.builtin.file:
+    path: "{{ mariadb_tls_dir }}"
+    state: directory
+    owner: root
+    group: mysql
+    mode: "0750"
+  when: mariadb_tls_generate | bool
+
+- name: Generate self-signed TLS certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -nodes
+      - -days
+      - "3650"
+      - -subj
+      - /CN={{ node_fqdn }}
+      - -keyout
+      - "{{ mariadb_tls_dir }}/server-key.pem"
+      - -out
+      - "{{ mariadb_tls_dir }}/server-cert.pem"
+    creates: "{{ mariadb_tls_dir }}/server-cert.pem"
+  when: mariadb_tls_generate | bool
+  notify: Restart mariadb
+
+- name: Let the server read the TLS key
+  ansible.builtin.file:
+    path: "{{ mariadb_tls_dir }}/server-key.pem"
+    owner: root
+    group: mysql
+    mode: "0640"
+  when: mariadb_tls_generate | bool
+
 - name: Write lab MariaDB configuration
   ansible.builtin.template:
     src: ha-lab.cnf.j2
@@ -57,7 +95,7 @@
     dest: "{{ mariadb_marker_file }}"
     mode: "0644"
     force: false
-    content: "Managed by mysql-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
 
 - name: Start MariaDB
   ansible.builtin.service:

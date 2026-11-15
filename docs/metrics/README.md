@@ -37,8 +37,8 @@ Every engine collector emits these with the same names, so failover detection an
 
 ## Timer units and clocks
 
-- Performance Schema timers are picoseconds. The collector divides by 1e12.
-- `Innodb_row_lock_time` is in milliseconds.
+- MySQL/MariaDB: Performance Schema timers are picoseconds. The collector divides by 1e12.
+- MySQL/MariaDB: `Innodb_row_lock_time` is in milliseconds.
 - Durations on the client use monotonic timers.
 - Event timestamps (fault injected, primary unavailable, new primary writable) are all taken on the client clock. That makes RTO and detection times free of cross-host clock error.
 - Two metrics subtract timestamps from different hosts: `replication_lag_seconds` and `replication_end_to_end_delay_seconds`. Both compare the source's original commit time with the replica's clock. Their uncertainty is at least the chrony offset that each report records.

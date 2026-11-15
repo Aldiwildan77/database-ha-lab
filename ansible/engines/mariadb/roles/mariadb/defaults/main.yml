@@ -5,6 +5,7 @@ mariadb_repo_key_url: https://mariadb.org/mariadb_release_signing_key.pgp
 mariadb_packages:
   - mariadb-server
   - mariadb-client
+  - openssl
 mariadb_socket: /run/mysqld/mysqld.sock
 mariadb_datadir: /var/lib/mysql
 mariadb_config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
@@ -41,7 +42,14 @@ mariadb_base_config:
 
 # Unencrypted (private) networks: refuse non-TLS TCP connections. Unix-socket logins are unaffected.
 mariadb_network_config: "{{ {'require_secure_transport': 'ON'} if lab_unencrypted_networks | default([]) else {} }}"
-mariadb_effective_config: "{{ mariadb_base_config | combine(mariadb_network_config, mysql_config, mysql_node_config) }}"
+# MariaDB 11.4+ generates a TLS certificate at startup when none is configured; older versions start without TLS,
+# so the lab writes a self-signed one for them (replication and the mesh check connect with TLS).
+mariadb_tls_generate: "{{ mariadb_version is version('11.4', '<') }}"
+mariadb_tls_dir: /etc/mysql/halab-tls
+mariadb_tls_config: >-
+  {{ {'ssl_cert': mariadb_tls_dir ~ '/server-cert.pem', 'ssl_key': mariadb_tls_dir ~ '/server-key.pem'}
+     if mariadb_tls_generate | bool else {} }}
+mariadb_effective_config: "{{ mariadb_base_config | combine(mariadb_tls_config, mariadb_network_config, mysql_config, mysql_node_config) }}"
 
 mariadb_users_session_vars:
   sql_log_bin: 0

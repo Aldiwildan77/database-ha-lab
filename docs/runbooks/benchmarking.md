@@ -101,7 +101,7 @@ All times use the client clock.
 | RPO | Acknowledged writes (JTL `success=true`) missing from the final primary's ledger. Writes whose COMMIT outcome is unknown are counted separately. |
 | Consistency errors | Lost acknowledged writes, plus writes the client saw fail that exist anyway, plus duplicates. Also reported: nodes whose ledger differs from the primary, and whether the account balance checksum matches. |
 | Write and read availability | Successful / attempted requests; also the share of seconds that had at least one success |
-| Replication convergence | Fault → all reachable nodes report the same `gtid_executed` transaction count |
+| Replication convergence | Fault → all reachable nodes report the same replication position (`ha_lab_replication_position`: GTID count on MySQL/MariaDB, WAL LSN on PostgreSQL) |
 | Recovery duration | Fault → every node healthy again (writable, or replicating with both threads, or ONLINE in the group, or wsrep ready) |
 
 The report states only what was measured. It never claims zero downtime or zero data loss beyond the run's own numbers.

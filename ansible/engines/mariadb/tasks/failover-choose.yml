@@ -87,6 +87,22 @@
   changed_when: false
   when: inventory_hostname in candidates
 
+# A candidate that did not reach fo_apply_target in every domain within the timeout is not eligible; in a
+# switchover it would lack the fenced primary's last transactions even when it matches the other candidates.
+- name: Mark candidates that caught up
+  ansible.builtin.set_fact:
+    fo_ready: >-
+      {%- set cur = {} -%}
+      {%- for g in fo_gtid.query_result[0][0].g.split(',') if g -%}
+      {%- set _ = cur.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {%- set behind = [] -%}
+      {%- for g in fo_apply_target.split(',') if g and cur.get(g.split('-')[0], 0) < g.split('-')[2] | int -%}
+      {%- set _ = behind.append(g) -%}
+      {%- endfor -%}
+      {{ behind | length == 0 }}
+  when: inventory_hostname in candidates
+
 - name: Choose new primary
   ansible.builtin.set_fact:
     fo_new_primary: >-
@@ -99,7 +115,7 @@
       {%- set _ = seqs.update({c: d}) -%}
       {%- endfor -%}
       {%- set ok = [] -%}
-      {%- for c in candidates -%}
+      {%- for c in candidates if hostvars[c].fo_ready | bool -%}
       {%- set behind = [] -%}
       {%- for o in candidates if o != c -%}
       {%- for domain, seq in seqs[o].items() if seq > seqs[c].get(domain, 0) -%}
@@ -115,8 +131,8 @@
   ansible.builtin.assert:
     that: fo_new_primary != ''
     fail_msg: >-
-      No candidate contains every transaction the others have
-      {{ ('(requested ' ~ new_primary ~ ' is behind another replica)') if new_primary | default('') else '' }}.
+      No candidate applied everything within {{ apply_timeout | default(120) }} s and contains every transaction the others have
+      {{ ('(requested ' ~ new_primary ~ ' is behind or still applying)') if new_primary | default('') else '' }}.
       GTID positions: {{ dict(candidates | zip(candidates | map('extract', hostvars, 'fo_gtid') | map(attribute='query_result') | map('first') | map('first') | map(attribute='g'))) }}
     quiet: true
   run_once: true

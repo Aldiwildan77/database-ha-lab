@@ -102,4 +102,4 @@
     dest: "{{ pxc_marker_file }}"
     mode: "0644"
     force: false
-    content: "Managed by mysql-ha-lab (percona-xtradb-cluster). Provisioned {{ ansible_date_time.iso8601 }}\n"
+    content: "Managed by database-ha-lab (percona-xtradb-cluster). Provisioned {{ ansible_date_time.iso8601 }}\n"

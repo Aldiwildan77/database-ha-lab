@@ -4,14 +4,14 @@
 
 The topology is the same as [streaming-replication](../streaming-replication/README.md). The difference: the primary waits for standby acknowledgements before a commit returns.
 
-The primary gets `conf.d/zzz-ha-lab-sync.conf`:
+Every node gets `conf.d/zzz-ha-lab-sync.conf`:
 
 ```text
 synchronous_standby_names = 'ANY <num_sync> ("db-02", "db-03")'   # every other node, by application_name
 synchronous_commit = '<commit_level>'
 ```
 
-The file is written on every node and lists the node's peers, so the setting follows the primary after a switchover or failover. It only takes effect on the node that is primary.
+Each node's file lists its peers, so the setting follows the primary after a switchover or failover. It only takes effect on the node that is primary.
 
 Settings in `config/ha.yml` → `sync_replication`:
 
@@ -22,7 +22,7 @@ Settings in `config/ha.yml` → `sync_replication`:
 
 ## Durability: what it does and does not guarantee
 
-- **Acknowledged commits are on `num_sync` standbys.** If the primary dies, a standby that acknowledged holds every acknowledged commit. `make promote` picks the most advanced standby, so no acknowledged commit is lost.
+- **Acknowledged commits are on `num_sync` standbys, not on every standby.** With `ANY num_sync`, any standbys can be the ones that acknowledged. `make promote` picks the most advanced standby among those it can reach that replayed everything they received within 120 s. That standby holds every acknowledged commit only when at least `standbys - num_sync + 1` standbys are reachable. Otherwise the acknowledging standbys may all be lost with the primary, and the playbook does not check for this.
 - **Commits wait instead of falling back.** Unlike MySQL/MariaDB semi-sync, there is no timeout. With fewer than `num_sync` reachable standbys, every commit waits. This is the price of no data loss.
 - **A cancelled wait is not a rollback.** If a client cancels a waiting commit, the transaction is already committed locally and becomes visible, but no standby may have it.
 - With `remote_write`, a simultaneous crash of the primary and the standby's OS can still lose the commit.
@@ -42,7 +42,7 @@ The runbooks are the streaming-replication runbooks. Deployment waits until `num
 
 ## Health and monitoring
 
-`make topology` fails when the primary has fewer synchronous standbys than `num_sync`, because commits are then blocked.
+`make topology` fails when any node is down, and when the primary has fewer synchronous standbys than `num_sync`, because commits are then blocked.
 
 | Metric | What it shows |
 |---|---|

@@ -33,7 +33,7 @@ ha_provider: streaming-replication # one of the engine's strategies below
 | Strategy | Failover | Commit acknowledged when | Data loss on primary failure |
 |---|---|---|---|
 | [streaming-replication](postgres/streaming-replication/README.md) | manual (`make promote`) | the primary has flushed its WAL locally | possible: WAL not yet received by a standby |
-| [sync-replication](postgres/sync-replication/README.md) | manual | `num_sync` standbys acknowledged it (`synchronous_commit` level) | not for acknowledged commits; commits wait instead |
+| [sync-replication](postgres/sync-replication/README.md) | manual | `num_sync` standbys acknowledged it (`synchronous_commit` level) | possible when every acknowledging standby is lost with the primary; commits wait instead of falling back |
 | `patroni` | planned | | |
 
 Planned strategies are refused by `make validate-config` until their roles exist.

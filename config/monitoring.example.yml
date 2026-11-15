@@ -20,5 +20,7 @@ iperf_port: 15201   # standard 5201; used by make network-matrix IPERF=1
 exporters:
   node_exporter:
     version: "1.12.1"
-  mysqld_exporter:
+  mysqld_exporter:                # MySQL and MariaDB
     version: "0.21.0"
+  postgres_exporter:              # PostgreSQL
+    version: "0.20.1"

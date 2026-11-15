@@ -13,7 +13,7 @@
 - One PGDG cluster named `halab` per node (`/etc/postgresql/<version>/halab`). The lab never touches other clusters on the host.
 - `make provision` creates every node standalone. `make ha` turns the non-primary nodes into standbys: a standalone node is replaced with a `pg_basebackup` of the primary, then streams from it.
 - Standbys are hot standbys (read-only queries allowed). `primary_conninfo` is set with `ALTER SYSTEM`; `recovery_target_timeline=latest` lets them follow a new primary's timeline.
-- Accounts: `repl` (replication), `rewind` (pg_rewind source access), `bench` (benchmark). Accounts are created on the primary and reach the standbys through replication.
+- Accounts: `repl` (replication), `bench` (benchmark) and, only when `db_admin_password` is set, `rewind` (pg_rewind source access). Accounts are created on the primary and reach the standbys through replication.
 - `wal_log_hints=on`, so a failed primary can be rewound instead of rebuilt.
 - No replication slots. `wal_keep_size=1GB` bounds how far a standby can fall behind before it needs a rebuild.
 - Failover is **manual**. Nothing promotes a standby automatically.
@@ -43,6 +43,7 @@ Re-running `make ha` is idempotent. Deployment refuses in these cases:
 ## Health checks
 
 `make topology` passes only when all of these hold:
+- every node is up;
 - exactly one node is out of recovery (writable);
 - every other node is in recovery;
 - every standby's walreceiver streams from that writable node.
@@ -58,7 +59,7 @@ Re-running `make ha` is idempotent. Deployment refuses in these cases:
 3. Point clients at the new primary. The benchmark's `ha` endpoint mode finds the writable node automatically.
 4. Events are written to `local/state/failover-*.json`.
 
-If the old primary is still running, `make promote` refuses. Pass `FORCE=1` only after you are sure clients cannot reach it. The playbook then stops the old primary (`pg_ctlcluster stop -m fast`) if it can reach it.
+If the old primary is still running, `make promote` refuses. Pass `FORCE=1` only after you are sure clients cannot reach it. The playbook then stops the old primary (`pg_ctlcluster stop -m fast`) if it can reach it, and the repoint step starts it again as a standby of the new primary. If it has WAL no standby received, that standby start fails and the node needs `make recover` (rewind or rebuild).
 
 ## Planned switchover
 
@@ -79,7 +80,7 @@ make recover NODE=db-01
 ```
 
 - A node that comes back as a standby is repointed to the current primary.
-- A node that comes back as a primary (the old primary after an unplanned failover) is stopped, rewound onto the new timeline with `pg_rewind`, and started as a standby. pg_rewind discards the transactions it had that never reached a standby; those are the data lost in the failover.
+- A node that comes back as a primary (an old primary that was unreachable during `make promote`) is stopped, rewound onto the new timeline with `pg_rewind`, and started as a standby. pg_rewind discards the transactions it had that never reached a standby; those are the data lost in the failover.
 - If the rewind fails (`db_admin_password` unset, or WAL no longer available), recovery stops and says why. To replace the node's data with a fresh base backup instead, run:
 
   ```bash
@@ -89,7 +90,7 @@ make recover NODE=db-01
 ## Monitoring
 
 - **Dashboards:** *Replication & HA* and *Failover & Recovery* use engine-neutral metrics. There is no PostgreSQL-specific server dashboard yet; `postgres_exporter` metrics (`pg_*`) are in Prometheus.
-- **Lag:** `replication_lag_seconds` is measured on the standby: `now()` minus the commit time of the last replayed transaction. It reads 0 when the primary is idle.
+- **Lag:** `replication_lag_seconds` is measured on the standby: `now()` minus the commit time of the last replayed transaction while the standby has received WAL it has not replayed yet, and 0 when it has none.
 - `ha_lab_streaming_standbys` (primary side) and `ha_lab_postgres_timeline` show topology changes.
 
 ## Known limitations

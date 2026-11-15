@@ -1,6 +1,6 @@
 [Unit]
 Description=ha-lab node collector ({{ db_engine }})
-After=network-online.target {{ lab_engine.collector.after }}
+After=network-online.target {{ lab_db_service_unit }}
 
 [Service]
 User={{ lab_engine.collector.run_as }}

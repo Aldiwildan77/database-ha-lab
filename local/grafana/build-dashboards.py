@@ -185,7 +185,7 @@ lb.add("timeseries", "fsync mean (Performance Schema)", [("rate(storage_fsync_se
 lb.add("timeseries", "Disk write latency (mean)", [('rate(node_disk_write_time_seconds_total{device!~"loop.*|ram.*|sr.*|dm-.*"}[$__rate_interval]) / rate(node_disk_writes_completed_total{device!~"loop.*|ram.*|sr.*|dm-.*"}[$__rate_interval])', "{{node}} {{device}}")], unit="s", w=8)
 lb.add("timeseries", "Network RTT client → node (p50)", [(q('network_rtt_seconds_bucket{job="local_probe"}', 0.5, "peer, le"), "{{peer}}")], unit="s")
 lb.add("timeseries", "Lock wait time per second", [("rate(database_lock_wait_seconds_total[$__rate_interval])", "{{node}}")], unit="s",
-       desc="InnoDB row lock wait seconds accumulated per second (millisecond resolution). Mean only.")
+       desc="Row lock wait seconds accumulated per second (MySQL/MariaDB: Innodb_row_lock_time, millisecond resolution). Mean only.")
 lb.save(f"{out}/latency-breakdown.json", "lab-latency-breakdown", "Latency Breakdown", ["latency"], "", bench_vars)
 
 # ---------------- 3. Network
@@ -202,7 +202,7 @@ n.add("timeseries", "Node → node RTT p50 / p99", [(q('network_rtt_seconds_buck
 n.add("timeseries", "Packet loss", [("network_packet_loss_ratio", "{{node}}→{{peer}}"), ('network_packet_loss_ratio{job="local_probe"}', "client→{{peer}}")], unit="percentunit")
 n.row("Client to node")
 n.add("timeseries", "Client → node RTT p50 / p99", [(q('network_rtt_seconds_bucket{job="local_probe"}', x, "peer, le"), "{{peer}} p" + str(int(x*100))) for x in (0.5, 0.99)], unit="s")
-n.add("timeseries", "TCP connect to MySQL p50", [(q('tcp_connect_duration_seconds_bucket', 0.5, "job, node, peer, le"), "{{job}} {{node}}→{{peer}}")], unit="s")
+n.add("timeseries", "TCP connect to database p50", [(q('tcp_connect_duration_seconds_bucket', 0.5, "job, node, peer, le"), "{{job}} {{node}}→{{peer}}")], unit="s")
 n.add("timeseries", "Network availability (probe success)", [("avg_over_time(network_probe_success[5m])", "{{job}} {{node}}→{{peer}}")], unit="percentunit")
 n.add("timeseries", "TCP retransmissions / s", [("rate(node_netstat_Tcp_RetransSegs[$__rate_interval])", "{{node}}")], unit="ops")
 n.add("timeseries", "Interface throughput (lab interface plus others)", [('rate(node_network_receive_bytes_total{device!~"lo|docker.*|veth.*|br-.*"}[$__rate_interval])', "{{node}} {{device}} rx"), ('rate(node_network_transmit_bytes_total{device!~"lo|docker.*|veth.*|br-.*"}[$__rate_interval])', "{{node}} {{device}} tx")], unit="Bps", w=24)

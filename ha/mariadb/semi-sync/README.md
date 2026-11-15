@@ -34,7 +34,7 @@ make promote
 make recover NODE=db-01
 ```
 
-The runbooks are the async-replication runbooks. The playbooks also move the semi-sync flags: the new primary gets master ON and slave OFF, and every other node gets the reverse.
+The runbooks are the async-replication runbooks. The playbooks also move the semi-sync flags: the new primary gets master ON and slave OFF, and every other reachable node gets the reverse. An unreachable old primary keeps master ON in its persisted config until `make recover`.
 
 ## Health and monitoring
 

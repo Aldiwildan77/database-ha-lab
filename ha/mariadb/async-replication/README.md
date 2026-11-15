@@ -42,6 +42,7 @@ Re-running `make ha` is idempotent. Deployment refuses in these cases:
 ## Health checks
 
 `make topology` passes only when all of these hold:
+- every node is up;
 - exactly one node is writable;
 - every other node is read-only;
 - every read-only node replicates from that writable node, with IO and SQL threads running.
@@ -50,14 +51,15 @@ Re-running `make ha` is idempotent. Deployment refuses in these cases:
 
 1. Confirm the primary is really gone. Check `make topology` and Grafana → *Replication & HA*. If it is reachable but misbehaving, use a switchover instead.
 2. Run `make promote`. The playbook:
+   - with `FORCE=1`, fences a reachable old primary first (`read_only=1`, persisted);
    - waits up to 120 s for every replica to apply what it received (`gtid_current_pos`);
-   - picks a replica that is at or ahead of every other candidate in every GTID domain, or the one you pass in `NEW_PRIMARY` if it qualifies;
+   - picks a replica that applied everything in time and is at or ahead of every other candidate in every GTID domain, or the one you pass in `NEW_PRIMARY` if it qualifies;
    - promotes it: `STOP SLAVE`, `RESET SLAVE ALL`, `read_only=0`;
-   - repoints the remaining replicas to it.
+   - repoints every reachable node to it, including a fenced old primary. A fenced old primary with transactions no replica received fails the errant check here: the promotion stands, and the old primary needs a rebuild.
 3. Point clients at the new primary. The benchmark's `ha` endpoint mode finds the writable node automatically.
 4. Events are written to `local/state/failover-*.json`.
 
-If the old primary is still running (a network partition), `make promote` refuses. Pass `FORCE=1` only after you are sure clients cannot reach it. The playbook then sets `read_only=1` on the old primary if it can still reach it, and persists it.
+If the old primary is still running (a network partition), `make promote` refuses. Pass `FORCE=1` only after you are sure clients cannot reach it.
 
 ## Planned switchover
 
@@ -66,7 +68,7 @@ make switchover NEW_PRIMARY=db-02
 ```
 
 1. The current primary is fenced with `read_only=1`.
-2. Every replica waits until it has applied the fenced primary's full GTID position.
+2. Every replica waits up to 120 s until it has applied the fenced primary's full GTID position. A replica that does not get there is not eligible.
 3. The new primary is promoted, and the old primary becomes a replica.
 
 No acknowledged transaction is lost. If no candidate qualifies, the old primary is unfenced.
@@ -81,7 +83,9 @@ make recover NODE=db-01
 2. Checks that the node is not ahead of the current primary in any GTID domain.
 3. Makes it read-only and replicates from the current primary.
 
-If the node holds transactions that never reached a replica, recovery stops. Those transactions are the data lost in the failover. Inspect them with `mariadb-binlog`, then rebuild the node (`make destroy DATA=1` for that node, or a backup restore).
+If no other node is writable, the rejoin is skipped and the final topology check fails. Promote a primary first.
+
+If the node holds transactions that never reached a replica, recovery stops. Those transactions are the data lost in the failover. Inspect them with `mariadb-binlog`, then rebuild the node from a backup restore. There is no per-node rebuild target: `make destroy DATA=1` purges every node.
 
 ## Monitoring
 

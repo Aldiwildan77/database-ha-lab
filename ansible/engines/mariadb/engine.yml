@@ -9,6 +9,7 @@ versions: ["10.11", "11.4", "11.8"]
 default_version: "11.4"
 architectures: [x86_64, aarch64]
 service: mariadb
+service_unit: mariadb.service
 process_names: [mariadbd]
 helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
 marker_dir: /etc/mysql
@@ -16,6 +17,7 @@ config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
 paths_written:
   - /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
   - /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+  - /etc/mysql/halab-tls (MariaDB before 11.4)
   - /etc/ha-lab
   - /etc/halab
   - /opt/ha-lab
@@ -31,7 +33,6 @@ exporter:
 collector:
   module: engine_mariadb
   run_as: mysqld_exporter
-  after: mariadb.service
   connect: {user: exporter, socket: /run/mysqld/mysqld.sock}
 ansible_collections: [ansible.mysql]
 ports:

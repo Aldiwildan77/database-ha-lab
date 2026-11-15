@@ -71,7 +71,7 @@
     dest: "{{ mysql_marker_file }}"
     mode: "0644"
     force: false
-    content: "Managed by mysql-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
 
 - name: Start MySQL
   ansible.builtin.service:

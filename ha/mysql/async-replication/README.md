@@ -39,6 +39,7 @@ Re-running `make ha` is idempotent: a second run reports `changed=0`. Deployment
 ## Health checks
 
 `make topology` passes only when all of these hold:
+- every node is up;
 - exactly one node is writable;
 - every other node is read-only;
 - every read-only node replicates from that writable node, with IO and SQL threads ON.
@@ -78,7 +79,7 @@ make recover NODE=db-01
 2. Checks that its GTID set is a subset of the current primary's.
 3. Makes it read-only and replicates from the current primary.
 
-If the node holds transactions that never reached a replica (errant GTIDs), recovery stops. Those transactions are the data lost in the failover. Inspect them with `mysqlbinlog`, then rebuild the node: `make destroy DATA=1` for that node, or a clone/backup restore.
+If the node holds transactions that never reached a replica (errant GTIDs), recovery stops. Those transactions are the data lost in the failover. Inspect them with `mysqlbinlog`, then rebuild the node from a clone or a backup restore. There is no per-node rebuild target: `make destroy DATA=1` purges every node.
 
 ## Monitoring
 

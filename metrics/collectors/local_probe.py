@@ -29,10 +29,10 @@ def main():
     a = ap.parse_args()
 
     rtt = promlib.Histogram("network_rtt_seconds", "ICMP RTT from the benchmark client to the node.", BUCKETS)
-    tcp = promlib.Histogram("tcp_connect_duration_seconds", "TCP handshake from the benchmark client to MySQL.", BUCKETS)
+    tcp = promlib.Histogram("tcp_connect_duration_seconds", "TCP handshake from the benchmark client to the database.", BUCKETS)
     sent = promlib.Counter("network_probe_packets_sent_total", "ICMP probes sent.")
     lost = promlib.Counter("network_probe_packets_lost_total", "ICMP probes without reply.")
-    tcp_fail = promlib.Counter("connection_errors_total", "Failed TCP connects to MySQL from the client probe.")
+    tcp_fail = promlib.Counter("connection_errors_total", "Failed TCP connects to the database from the client probe.")
     gauges: dict = {}
     lock = threading.Lock()
 

@@ -56,7 +56,8 @@ The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each 
 | `packages`, `conflicting_packages`, `apt_repository` | Per strategy or `default`; used by `make plan-host` |
 | `ports`, `primary_port`, `exporter_port` | Lab defaults that differ from the product standard; `config` names the `ha.yml` override; `span` reserves consecutive ports |
 | `exporter` | Role that installs it, its name, and its "up" metric |
-| `collector` | Collector module, the system user it runs as, the unit it starts after, and how it connects |
+| `service_unit` | systemd unit that runs the server (`{version}` is replaced with `db_version`); the firewall starts before it and the collector after it. Default `<service>.service` |
+| `collector` | Collector module, the system user it runs as, and how it connects |
 | `ansible_collections` | Collections this machine needs for the engine (checked by `make validate-local`) |
 | `report_queries` | Optional engine-only PromQL added to the report |
 | `ha.<strategy>` | `family`, `failover`, traits (`semi_sync`, `synchronous`), node limits, mesh and client ports, `ha_endpoint`, and the roles for `provision` and `deploy` |
