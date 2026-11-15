@@ -1,5 +1,6 @@
 ---
 exclude_paths:
+  - .claude/
   - ansible/collections/
   - .ansible/
   - local/
