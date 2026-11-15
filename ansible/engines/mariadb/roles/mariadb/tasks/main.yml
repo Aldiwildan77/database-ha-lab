@@ -1,0 +1,102 @@
+---
+- name: Check for an existing database datadir
+  ansible.builtin.stat:
+    path: "{{ mariadb_datadir }}/mysql"
+  register: mariadb_existing_datadir
+
+- name: Check for lab ownership marker
+  ansible.builtin.stat:
+    path: "{{ mariadb_marker_file }}"
+  register: mariadb_marker
+
+- name: Protect data the lab did not create
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} already has a database datadir at {{ mariadb_datadir }} that this lab did
+      not create. Refusing to touch it. Re-run with -e mariadb_adopt_existing=true to take it over
+      (config will change and mariadbd will restart; data is not deleted).
+  when:
+    - mariadb_existing_datadir.stat.exists
+    - not mariadb_marker.stat.exists
+    - not (mariadb_adopt_existing | bool)
+
+- name: Add MariaDB APT repository
+  ansible.builtin.deb822_repository:
+    name: mariadb
+    types: deb
+    uris: "{{ mariadb_repo_uri }}"
+    suites: "{{ ansible_distribution_release }}"
+    components: [main]
+    signed_by: "{{ mariadb_repo_key_url }}"
+  register: mariadb_repo
+
+- name: Prefer the MariaDB repository for mariadb packages only
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/mariadb
+    mode: "0644"
+    content: |
+      Package: mariadb-* libmariadb* galera-4
+      Pin: origin deb.mariadb.org
+      Pin-Priority: 1001
+
+- name: Install MariaDB
+  ansible.builtin.apt:
+    name: "{{ mariadb_packages }}"
+    state: present
+    update_cache: "{{ mariadb_repo.changed }}"
+
+- name: Write lab MariaDB configuration
+  ansible.builtin.template:
+    src: ha-lab.cnf.j2
+    dest: "{{ mariadb_config_file }}"
+    mode: "0644"
+  notify: Restart mariadb
+
+- name: Mark datadir as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ mariadb_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by mysql-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+
+- name: Start MariaDB
+  ansible.builtin.service:
+    name: mariadb
+    state: started
+    enabled: true
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for MariaDB socket
+  ansible.builtin.wait_for:
+    path: "{{ mariadb_socket }}"
+    timeout: 120
+
+- name: Check root access over the Unix socket
+  ansible.mysql.mysql_info:
+    login_unix_socket: "{{ mariadb_socket }}"
+    filter: [version, settings]
+  register: mariadb_info
+  failed_when: false
+
+- name: Fail on missing socket authentication
+  ansible.builtin.fail:
+    msg: >-
+      Cannot log in as root@localhost over {{ mariadb_socket }}: {{ mariadb_info.msg | default('') }}.
+      The lab expects root to use unix_socket authentication (the package default when no root password is set).
+  when: mariadb_info.version is not defined
+
+- name: Assert effective server settings
+  ansible.builtin.assert:
+    that:
+      - mariadb_info.version.full is version(mariadb_version, '>=')
+      - mariadb_info.version.full is version(mariadb_version ~ '.999', '<=')
+      - mariadb_info.settings.gtid_strict_mode | string in ['1', 'ON', 'True', 'true']
+      - mariadb_info.settings.server_id | int == node_server_id | int
+      - mariadb_info.settings.port | int == mysql_port | int
+    fail_msg: "Unexpected MariaDB state on {{ inventory_hostname }}: version {{ mariadb_info.version.full }}"
+    quiet: true
+
+- name: Create lab accounts
+  ansible.builtin.import_tasks: users.yml

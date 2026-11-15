@@ -1,0 +1,12 @@
+---
+- name: Refuse a primary that is itself replicating
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is configured as a replica of {{ replication_status.Master_Host | default('?') }}.
+      Run make destroy or failover.yml before rebuilding with it as primary.
+  when: replication_status | length > 0
+
+- name: Make primary writable
+  ansible.builtin.include_tasks: set-variables.yml
+  vars:
+    replication_vars: {read_only: 0}

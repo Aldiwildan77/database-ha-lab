@@ -1,9 +1,9 @@
 ---
-# MariaDB engine descriptor. status: planned means the strategies, ports and settings are defined here,
-# but the roles they name do not exist yet, so selecting this engine is refused at validate time.
+# MariaDB engine descriptor. A strategy with status: planned is defined here, but its roles do not exist
+# yet, so selecting it is refused at validate time.
 name: mariadb
 display: MariaDB
-status: planned
+status: ready
 config_section: mariadb
 versions: ["10.11", "11.4", "11.8"]
 default_version: "11.4"
@@ -11,6 +11,7 @@ service: mariadb
 process_names: [mariadbd]
 helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
 marker_dir: /etc/mysql
+config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
 primary_port: mariadb
 exporter_port: mariadb_exporter
 exporter:
@@ -35,11 +36,11 @@ packages:
   default: [mariadb-server, mariadb-client]
   galera: [mariadb-server, mariadb-client, galera-4]
 apt_repository:
-  default: downloads.mariadb.com (MariaDB repository, pinned to mariadb-* packages only)
+  default: deb.mariadb.org (MariaDB repository, pinned to mariadb-* packages only)
 conflicting_packages:
   default: [mysql-server, mysql-community-server, mysql-server-8.0, percona-server-server, percona-xtradb-cluster]
 
-# Same fields as mysql.yml. MariaDB GTIDs differ from MySQL's, so replication roles are separate roles.
+# Same fields as mysql.yml. MariaDB GTIDs differ from MySQL's, so replication has its own role.
 ha:
   async-replication:
     family: replication
@@ -61,6 +62,7 @@ ha:
     provision: [{role: mariadb}]
     deploy: [{role: mariadb-replication}]
   galera:
+    status: planned
     family: galera
     failover: galera
     min_nodes: 3
@@ -71,6 +73,7 @@ ha:
     provision: [{role: mariadb}]
     deploy: [{role: mariadb-galera}]
   maxscale:
+    status: planned
     family: replication
     failover: maxscale
     min_nodes: 3

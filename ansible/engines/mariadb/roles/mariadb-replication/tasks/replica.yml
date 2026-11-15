@@ -1,0 +1,116 @@
+---
+- name: Check the replica already follows the primary
+  ansible.builtin.set_fact:
+    replication_in_place: >-
+      {{ replication_status | length > 0
+         and replication_status.Master_Host | default('') == hostvars[replication_primary].node_fqdn
+         and replication_status.Using_Gtid | default('No') != 'No' }}
+
+- name: Read local GTID position
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SELECT @@GLOBAL.gtid_current_pos AS pos
+  register: replication_local_gtid
+  changed_when: false
+  when: not replication_in_place
+
+- name: Read primary GTID position
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SELECT @@GLOBAL.gtid_current_pos AS pos
+  delegate_to: "{{ replication_primary }}"
+  register: replication_primary_gtid
+  changed_when: false
+  when: not replication_in_place
+
+# A domain where this node is ahead of the primary holds transactions the primary lacks.
+- name: Find errant transactions
+  ansible.builtin.set_fact:
+    replication_errant: >-
+      {%- set local = {} -%}
+      {%- set primary = {} -%}
+      {%- for g in replication_local_gtid.query_result[0][0].pos.split(',') if g -%}
+      {%- set _ = local.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {%- for g in replication_primary_gtid.query_result[0][0].pos.split(',') if g -%}
+      {%- set _ = primary.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {%- set out = [] -%}
+      {%- for domain, seq in local.items() if seq > primary.get(domain, 0) -%}
+      {%- set _ = out.append('domain ' ~ domain ~ ': local ' ~ seq ~ ' > primary ' ~ primary.get(domain, 0)) -%}
+      {%- endfor -%}
+      {{ out | to_json }}
+  when: not replication_in_place
+
+- name: Refuse replicas with errant transactions
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} has transactions the primary does not have
+      ({{ replication_local_gtid.query_result[0][0].pos }} vs {{ replication_primary_gtid.query_result[0][0].pos }};
+      {{ replication_errant | from_json | join(', ') }}). Replicating would diverge.
+      Rebuild this node or remove the errant transactions deliberately.
+  when:
+    - not replication_in_place
+    - replication_errant | from_json | length > 0
+
+- name: Make replica read-only
+  ansible.builtin.include_tasks: set-variables.yml
+  vars:
+    replication_vars: {read_only: 1}
+
+- name: Stop replication before changing source
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: STOP SLAVE
+  when: not replication_in_place
+
+# current_pos, not slave_pos: a node that was primary has its own writes in the binlog, not in gtid_slave_pos.
+- name: Point replica at primary
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: >-
+      CHANGE MASTER TO MASTER_HOST=%s, MASTER_PORT=%s, MASTER_USER=%s, MASTER_PASSWORD=%s,
+      MASTER_USE_GTID=current_pos, MASTER_CONNECT_RETRY=5, MASTER_SSL={{ 1 if replication_ssl | bool else 0 }},
+      MASTER_SSL_VERIFY_SERVER_CERT=0
+    positional_args:
+      - "{{ hostvars[replication_primary].node_fqdn }}"
+      - "{{ mysql_port | int }}"
+      - "{{ replication_user }}"
+      - "{{ db_replication_password }}"
+  no_log: true
+  when: not replication_in_place
+
+- name: Start replication
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: START SLAVE
+  when: >-
+    not replication_in_place
+    or replication_status.Slave_IO_Running | default('') != 'Yes'
+    or replication_status.Slave_SQL_Running | default('') != 'Yes'
+
+# 1236 means the primary's binlog lacks this node's position: it executed transactions the primary never had.
+- name: Wait for replication threads
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SHOW SLAVE STATUS
+  register: replication_check
+  changed_when: false
+  until: >-
+    (replication_check.query_result[0][0].Slave_IO_Running | default('') == 'Yes'
+     and replication_check.query_result[0][0].Slave_SQL_Running | default('') == 'Yes')
+    or replication_check.query_result[0][0].Last_IO_Errno | default(0) | int == 1236
+  retries: 20
+  delay: 3
+
+- name: Refuse a replica that diverged from the primary
+  ansible.builtin.assert:
+    that:
+      - replication_check.query_result[0][0].Slave_IO_Running == 'Yes'
+      - replication_check.query_result[0][0].Slave_SQL_Running == 'Yes'
+    fail_msg: >-
+      {{ inventory_hostname }} cannot replicate from {{ hostvars[replication_primary].node_fqdn }}:
+      {{ replication_check.query_result[0][0].Last_IO_Error | default('') }}
+      {{ replication_check.query_result[0][0].Last_SQL_Error | default('') }}
+      Rebuild this node, or discard its extra transactions deliberately.
+    quiet: true

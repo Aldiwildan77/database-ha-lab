@@ -1,0 +1,17 @@
+---
+# MariaDB hook for destroy-ha.yml. Removes the replication layer and leaves standalone, writable nodes.
+- name: Remove replication and switch semi-sync off
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query:
+      - STOP SLAVE
+      - RESET SLAVE ALL
+      - SET GLOBAL rpl_semi_sync_master_enabled = OFF
+      - SET GLOBAL rpl_semi_sync_slave_enabled = OFF
+      - SET GLOBAL read_only = 0
+  failed_when: false
+
+- name: Drop the persisted role state
+  ansible.builtin.file:
+    path: /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+    state: absent

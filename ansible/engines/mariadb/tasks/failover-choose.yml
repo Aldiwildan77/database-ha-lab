@@ -1,0 +1,122 @@
+---
+# MariaDB hook for failover.yml (manual failover). Fences the old primary, waits for candidates to apply,
+# and sets fo_new_primary to a candidate whose GTID position is at or ahead of every other candidate's in
+# every domain. Fails when none is safe.
+- name: Fence a reachable old primary before a forced failover
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SET GLOBAL read_only = 1
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'failover' and old_primary_up
+
+- name: Fence old primary (switchover)
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SET GLOBAL read_only = 1
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'switchover'
+
+- name: Persist the fence across a restart of the old primary
+  community.general.ini_file:
+    path: /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+    section: mariadbd
+    option: read_only
+    value: "1"
+    no_extra_spaces: false
+    mode: "0644"
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: (failover_mode == 'failover' and old_primary_up) or failover_mode == 'switchover'
+
+- name: Read fenced primary GTID position
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.gtid_current_pos AS g
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  register: fo_old_gtid
+  changed_when: false
+  when: failover_mode == 'switchover'
+
+- name: Find the position each candidate must reach
+  ansible.builtin.set_fact:
+    fo_apply_target: "{{ fo_old_gtid.query_result[0][0].g if failover_mode == 'switchover' else lab_topo.replica.received }}"
+  when: inventory_hostname in candidates
+
+# Polls gtid_current_pos instead of MASTER_GTID_WAIT: that function watches gtid_slave_pos only, which stays
+# behind on a node that was primary earlier and has no new events to apply, so it would wait out the timeout.
+- name: Wait for candidates to apply everything they received
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.gtid_current_pos AS g
+  register: fo_wait
+  changed_when: false
+  failed_when: false
+  vars:
+    fo_target_seq: >-
+      {%- set d = {} -%}
+      {%- for g in fo_apply_target.split(',') if g -%}
+      {%- set _ = d.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {{ d | to_json }}
+    fo_current_seq: >-
+      {%- set d = {} -%}
+      {%- for g in (fo_wait.query_result[0][0].g | default('')).split(',') if g -%}
+      {%- set _ = d.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {{ d | to_json }}
+    fo_behind: >-
+      {%- set cur = fo_current_seq | from_json -%}
+      {%- set behind = [] -%}
+      {%- for domain, seq in (fo_target_seq | from_json).items() if cur.get(domain, 0) < seq -%}
+      {%- set _ = behind.append(domain) -%}
+      {%- endfor -%}
+      {{ behind | length }}
+  until: fo_wait.query_result is defined and fo_behind | int == 0
+  retries: "{{ ((apply_timeout | default(120) | int) / 2) | int }}"
+  delay: 2
+  when: inventory_hostname in candidates and fo_apply_target | length > 0
+
+- name: Read candidate GTID positions after apply
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.gtid_current_pos AS g
+  register: fo_gtid
+  changed_when: false
+  when: inventory_hostname in candidates
+
+- name: Choose new primary
+  ansible.builtin.set_fact:
+    fo_new_primary: >-
+      {%- set seqs = {} -%}
+      {%- for c in candidates -%}
+      {%- set d = {} -%}
+      {%- for g in hostvars[c].fo_gtid.query_result[0][0].g.split(',') if g -%}
+      {%- set _ = d.update({g.split('-')[0]: g.split('-')[2] | int}) -%}
+      {%- endfor -%}
+      {%- set _ = seqs.update({c: d}) -%}
+      {%- endfor -%}
+      {%- set ok = [] -%}
+      {%- for c in candidates -%}
+      {%- set behind = [] -%}
+      {%- for o in candidates if o != c -%}
+      {%- for domain, seq in seqs[o].items() if seq > seqs[c].get(domain, 0) -%}
+      {%- set _ = behind.append(o) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {%- if not behind -%}{%- set _ = ok.append(c) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ (new_primary if new_primary | default('') in ok else '') if new_primary | default('') else (ok | first | default('')) }}
+  run_once: true
+
+- name: Refuse when no safe candidate exists
+  ansible.builtin.assert:
+    that: fo_new_primary != ''
+    fail_msg: >-
+      No candidate contains every transaction the others have
+      {{ ('(requested ' ~ new_primary ~ ' is behind another replica)') if new_primary | default('') else '' }}.
+      GTID positions: {{ dict(candidates | zip(candidates | map('extract', hostvars, 'fo_gtid') | map(attribute='query_result') | map('first') | map('first') | map(attribute='g'))) }}
+    quiet: true
+  run_once: true

@@ -1,6 +1,6 @@
 # Database engines and HA strategies
 
-The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is the only engine that is ready; MariaDB and PostgreSQL are planned.
+The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`; its `galera` and `maxscale` strategies and PostgreSQL are planned.
 
 ## Layout
 
@@ -12,7 +12,10 @@ ansible/
       roles/               mysql, mysql-exporter, replication, orchestrator, innodb-cluster,
                            percona-xtradb-cluster, percona-repo
       tasks/               hooks called by the core playbooks (see "Engine hooks")
-    mariadb/engine.yml     planned
+    mariadb/               ready (async-replication, semi-sync)
+      engine.yml           descriptor; galera and maxscale are status: planned
+      roles/               mariadb, mariadb-replication (reuses mysql-exporter)
+      tasks/               hooks
     postgres/engine.yml    planned
   roles/                   core roles: common (firewall), node-exporter, lab-collector
   playbooks/, tasks/       core: engine-neutral, call the engine's roles and hooks
@@ -36,15 +39,15 @@ db_engine: mysql             # default
 ha_provider: async-replication
 ```
 
-The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each one at load time (unknown port names, missing keys). It rejects an unknown engine, a strategy the engine does not support, and an engine with `status: planned`.
+The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each one at load time (unknown port names, missing keys). It rejects an unknown engine, a strategy the engine does not support, an engine with `status: planned` and a strategy with `status: planned`.
 
 ## Descriptor
 
 | Key | Purpose |
 |---|---|
-| `name`, `display`, `status` | `status: planned` blocks selection until the roles exist |
-| `config_section`, `versions`, `default_version` | Engine settings section in `ha.yml` |
-| `service`, `process_names`, `helper_processes`, `marker_dir` | Used by host checks, faults and markers |
+| `name`, `display`, `status` | `status: planned` blocks selection until the roles exist; the same key on one `ha.<strategy>` blocks only that strategy |
+| `config_section`, `versions`, `default_version` | Engine settings section in `ha.yml` (`mysql:`, `mariadb:`); the same key under a node holds per-node server options |
+| `service`, `process_names`, `helper_processes`, `marker_dir`, `config_file` | Used by host checks, faults and markers; `config_file` is the lab settings file shown by `make plan-host` |
 | `packages`, `conflicting_packages`, `apt_repository` | Per strategy or `default`; used by `make plan-host` |
 | `ports`, `primary_port`, `exporter_port` | Lab defaults that differ from the product standard; `config` names the `ha.yml` override; `span` reserves consecutive ports |
 | `exporter` | Role that installs it, its name, and its "up" metric |
@@ -96,19 +99,32 @@ Core playbooks call these task files in `ansible/engines/<engine>/tasks/`. Each 
 3. Add `metrics/collectors/engine_<engine>.py` (class `Collector(cfg)` with `.lock` and `.collect(registry)` that emits the neutral metrics).
 4. Add `jmeter/scripts/dialects/<engine>.groovy` and `jmeter/drivers/<engine>.env`.
 5. Add engine-only rules in `local/prometheus/rules/engine-<engine>.yml` if needed.
-6. Run the container tests for each strategy, then set `status: ready`.
+6. Run the container tests for each strategy, then set `status: ready` (per strategy while others are still `planned`).
 
-## Planned engines
+## MariaDB
+
+Target: MariaDB 11.4 LTS on Ubuntu 24.04, installed from `deb.mariadb.org` and pinned to `mariadb-*` packages only. The provisioning role refuses a datadir it did not create, writes only `/etc/mysql/mariadb.conf.d/zz-ha-lab.cnf`, and uses the lab port (13306).
+
+How it differs from MySQL:
+
+- GTIDs are `domain-server-seq`. The position is `gtid_current_pos`; `gtid_strict_mode` is on, so a replica that executed extra transactions is refused by the primary (error 1236) and by the role before it connects.
+- Replicas start with `MASTER_USE_GTID=current_pos`, not `slave_pos`. A node that was primary has its own writes in the binlog and an empty or stale `gtid_slave_pos`; `slave_pos` would replay history on it.
+- There is no `super_read_only` and no `SET PERSIST`. `read_only` gates writes (root bypasses it through `READ ONLY ADMIN`); the roles write `read_only` and the semi-sync flags to `/etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf` so they survive a restart.
+- Semi-sync is built in (`rpl_semi_sync_master_enabled`, `rpl_semi_sync_slave_enabled`). It always waits for one replica, so `semi_sync.wait_for_replica_count` must be 1.
+- Replica state comes from `SHOW SLAVE STATUS`. There are no Performance Schema replication tables, so the collector has no per-transaction apply histogram and no per-COMMIT histogram. Server-side statement time comes from the `query_response_time` plugin.
+- Promotion safety: the hook waits until each candidate's `gtid_current_pos` reaches the old primary's (or the last position the replica received), then picks a candidate that is at or ahead of every other candidate in every domain. When none is, it refuses. `MASTER_GTID_WAIT` is not used: it follows `gtid_slave_pos`, which stays behind on a node that was primary earlier.
+- The shared `mysql-exporter` role is reused. `ansible.mysql` 5.x warns that its MariaDB support ends in 6.0.0; `requirements.yml` pins 5.2.1.
+
+## Planned strategies and engines
 
 | Engine | Strategies | Failover |
 |---|---|---|
-| MariaDB | async-replication, semi-sync | manual |
 | MariaDB | galera | built in (Galera) |
 | MariaDB | maxscale | MaxScale |
 | PostgreSQL | streaming-replication, sync-replication | manual |
 | PostgreSQL | patroni (etcd) | Patroni |
 
-Their descriptors, JMeter dialects and driver files exist. Their roles, hooks and collectors do not, and the dialects and driver versions are untested.
+Their descriptors exist and, for PostgreSQL, so do the JMeter dialect and driver file. The roles, hooks and collectors do not, and the PostgreSQL dialect and driver version are untested.
 
 ## Default ports
 

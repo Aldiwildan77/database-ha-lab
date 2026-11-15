@@ -1,0 +1,24 @@
+---
+# Sets dynamic server variables and records them in the lab state file so they survive a restart
+# (MariaDB has no SET PERSIST). Input: replication_vars (name -> value). Sets replication_vars_changed.
+- name: Set server variables
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: "SET GLOBAL {{ item.key }} = {{ item.value }}"
+  loop: "{{ replication_vars | dict2items }}"
+  changed_when: false
+
+- name: Persist server variables
+  community.general.ini_file:
+    path: "{{ replication_state_file }}"
+    section: mariadbd
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: false
+    mode: "0644"
+  loop: "{{ replication_vars | dict2items }}"
+  register: replication_persisted
+
+- name: Record whether anything changed
+  ansible.builtin.set_fact:
+    replication_vars_changed: "{{ replication_persisted.changed }}"

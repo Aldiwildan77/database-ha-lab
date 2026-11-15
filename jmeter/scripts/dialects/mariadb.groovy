@@ -1,4 +1,5 @@
-// MariaDB dialect. UNTESTED: the mariadb engine is planned (see ansible/engines/mariadb/engine.yml).
+// MariaDB dialect: every engine file defines class LabDialect with the same methods (see LabDb.groovy).
+// ssl_mode REQUIRED maps to sslMode=trust (encrypted, certificate not verified); anything else connects without TLS.
 class LabDialect {
     String url(String hostPort, String db, Properties p) {
         String connectMs = p.getProperty('connect_timeout_ms', '3000')

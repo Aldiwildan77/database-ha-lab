@@ -1,0 +1,53 @@
+---
+mariadb_version: "{{ mysql_version }}"
+mariadb_repo_uri: "https://deb.mariadb.org/{{ mariadb_version }}/{{ ansible_distribution | lower }}"
+mariadb_repo_key_url: https://mariadb.org/mariadb_release_signing_key.pgp
+mariadb_packages:
+  - mariadb-server
+  - mariadb-client
+mariadb_socket: /run/mysqld/mysqld.sock
+mariadb_datadir: /var/lib/mysql
+mariadb_config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
+mariadb_marker_file: /etc/mysql/.ha-lab-managed
+
+# Set true to let the lab take over a datadir it did not create.
+mariadb_adopt_existing: false
+
+# Fraction of total RAM; lower it (e.g. 0.25) on servers shared with other services.
+mariadb_buffer_pool_ratio: "{{ (lab_engine_settings | default({})).buffer_pool_ratio | default(0.5) | float }}"
+mariadb_buffer_pool_mb: "{{ [128, (ansible_memtotal_mb * mariadb_buffer_pool_ratio) | int] | max }}"
+
+mariadb_base_config:
+  server_id: "{{ node_server_id }}"
+  report_host: "{{ node_fqdn }}"
+  port: "{{ mysql_port }}"
+  bind_address: 0.0.0.0
+  skip_name_resolve: "ON"
+  max_connections: 500
+  log_bin: mariadb-bin
+  log_slave_updates: "ON"
+  binlog_format: ROW
+  gtid_strict_mode: "ON"
+  binlog_expire_logs_seconds: 604800
+  innodb_buffer_pool_size: "{{ mariadb_buffer_pool_mb }}M"
+  innodb_flush_log_at_trx_commit: 1
+  sync_binlog: 1
+  slow_query_log: "ON"
+  long_query_time: 1
+  performance_schema: "ON"
+  plugin_load_add: query_response_time
+  query_response_time_stats: "ON"
+  query_response_time_range_base: 2
+
+# Unencrypted (private) networks: refuse non-TLS TCP connections. Unix-socket logins are unaffected.
+mariadb_network_config: "{{ {'require_secure_transport': 'ON'} if lab_unencrypted_networks | default([]) else {} }}"
+mariadb_effective_config: "{{ mariadb_base_config | combine(mariadb_network_config, mysql_config, mysql_node_config) }}"
+
+mariadb_users_session_vars:
+  sql_log_bin: 0
+mariadb_exporter_user: exporter
+mariadb_replication_user: repl
+mariadb_benchmark_user: bench
+mariadb_benchmark_database: "{{ lab_benchmark.database | default('halab') }}"
+# Host patterns (net/mask) for every node network and allowed source; computed by the inventory plugin.
+mariadb_account_hosts: "{{ mysql_client_hosts }}"

@@ -1,0 +1,37 @@
+---
+- name: Require replication password
+  ansible.builtin.assert:
+    that: db_replication_password | length >= 16
+    fail_msg: Set db_replication_password (>= 16 chars) in config/secrets.yml or LAB_DB_REPLICATION_PASSWORD.
+    quiet: true
+  no_log: true
+
+- name: MariaDB semi-sync waits for exactly one replica
+  ansible.builtin.assert:
+    that: replication_semi_sync_settings.wait_for_replica_count | int == 1
+    fail_msg: MariaDB semi-sync has no wait_for_replica_count; it always waits for one replica. Set semi_sync.wait_for_replica_count to 1.
+    quiet: true
+  when: replication_semi_sync | bool
+
+- name: Read replica status
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SHOW SLAVE STATUS
+  register: replication_status_raw
+  changed_when: false
+
+- name: Record replica status
+  ansible.builtin.set_fact:
+    replication_status: "{{ replication_status_raw.query_result[0][0] | default({}) }}"
+
+- name: Configure semi-synchronous replication
+  ansible.builtin.include_tasks: semi-sync.yml
+  when: replication_semi_sync | bool
+
+- name: Configure primary
+  ansible.builtin.include_tasks: primary.yml
+  when: inventory_hostname == replication_primary
+
+- name: Configure replica
+  ansible.builtin.include_tasks: replica.yml
+  when: inventory_hostname != replication_primary

@@ -1,0 +1,14 @@
+---
+# MariaDB hook for consistency.yml. Writes the run's txn_ids to {{ ledger_file }} and registers cs_dump;
+# cs_dump.stdout is '<replication position> <accounts rows> <accounts balance sum>'.
+- name: Export txn_ids for the run
+  ansible.builtin.shell: |
+    set -o pipefail
+    mariadb -N -B -e "SELECT txn_id FROM \`{{ db }}\`.ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > {{ ledger_file }}
+    mariadb -N -B -e "SELECT @@gtid_current_pos; SELECT COUNT(*), COALESCE(SUM(balance), 0) FROM \`{{ db }}\`.accounts" | tr '\t\n' '  '
+  args:
+    executable: /bin/bash
+  register: cs_dump
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true

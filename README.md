@@ -152,7 +152,7 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 ```text
 config/            user configuration (*.example.yml committed, real files gitignored)
 ansible/           inventory plugin, engine-neutral playbooks and core roles (common, node-exporter, lab-collector)
-ansible/engines/   one folder per database engine: descriptor, roles and hooks (mysql ready; mariadb, postgres planned)
+ansible/engines/   one folder per database engine: descriptor, roles and hooks (mysql, mariadb ready; mariadb galera/maxscale and postgres planned)
 ha/<provider>/     architecture, runbooks and limitations per HA provider
 local/             Prometheus, Grafana (dashboards + generator), compose, helper scripts
 metrics/           collectors (stdlib Python), metric schema, quantile recording rules

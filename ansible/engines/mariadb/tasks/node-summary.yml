@@ -1,0 +1,14 @@
+---
+# MariaDB hook for the provisioning summary: sets lab_db_summary (shown as-is).
+- name: Read MariaDB status
+  ansible.mysql.mysql_info:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    filter: [version, settings]
+  register: summary_mariadb
+
+- name: Set summary
+  ansible.builtin.set_fact:
+    lab_db_summary:
+      version: "{{ summary_mariadb.version.full }}"
+      server_id: "{{ summary_mariadb.settings.server_id }}"
+      gtid_strict_mode: "{{ summary_mariadb.settings.gtid_strict_mode }}"

@@ -1,0 +1,46 @@
+---
+# MariaDB: sets lab_topo (contract in ansible/tasks/topology-facts.yml). db_up=false when unreachable.
+# Positions are MariaDB GTIDs (domain-server-seq). MariaDB has no super_read_only: read_only alone gates writes.
+- name: Read server state
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query:
+      - >-
+        SELECT @@GLOBAL.read_only AS read_only, @@GLOBAL.gtid_current_pos AS gtid_current_pos,
+               @@GLOBAL.gtid_binlog_pos AS gtid_binlog_pos, @@GLOBAL.gtid_slave_pos AS gtid_slave_pos,
+               @@GLOBAL.server_id AS server_id
+      - SHOW SLAVE STATUS
+      - >-
+        SELECT VARIABLE_NAME AS name, VARIABLE_VALUE AS value FROM information_schema.GLOBAL_STATUS
+        WHERE VARIABLE_NAME IN ('wsrep_ready', 'wsrep_cluster_status', 'wsrep_cluster_size',
+          'wsrep_local_state_comment', 'wsrep_connected', 'Rpl_semi_sync_master_status',
+          'Rpl_semi_sync_slave_status')
+  register: topo_raw
+  become: true
+  ignore_unreachable: true
+  failed_when: false
+  changed_when: false
+
+- name: Build topology facts
+  ansible.builtin.set_fact:
+    lab_topo:
+      node: "{{ inventory_hostname }}"
+      db_up: "{{ topo_raw.query_result is defined }}"
+      error: "{{ topo_raw.msg | default('') if topo_raw.query_result is not defined else '' }}"
+      read_only: "{{ (topo_raw.query_result[0][0].read_only | int == 1) if topo_raw.query_result is defined else none }}"
+      gtid_current_pos: "{{ topo_raw.query_result[0][0].gtid_current_pos if topo_raw.query_result is defined else '' }}"
+      position: "{{ topo_raw.query_result[0][0].gtid_current_pos if topo_raw.query_result is defined else '' }}"
+      replica: >-
+        {{ {'source_host': r.Master_Host, 'source_port': r.Master_Port,
+            'io_state': 'ON' if r.Slave_IO_Running == 'Yes' else r.Slave_IO_Running | upper,
+            'sql_state': 'ON' if r.Slave_SQL_Running == 'Yes' else r.Slave_SQL_Running | upper,
+            'received': r.Gtid_IO_Pos, 'using_gtid': r.Using_Gtid,
+            'io_error': r.Last_IO_Error, 'sql_error': r.Last_SQL_Error,
+            'seconds_behind': r.Seconds_Behind_Master}
+           if (topo_raw.query_result is defined and topo_raw.query_result[1] | length) else {} }}
+      group: []
+      status: >-
+        {{ dict(topo_raw.query_result[2] | map(attribute='name') | map('lower')
+                | zip(topo_raw.query_result[2] | map(attribute='value'))) if topo_raw.query_result is defined else {} }}
+  vars:
+    r: "{{ topo_raw.query_result[1][0] if (topo_raw.query_result is defined and topo_raw.query_result[1] | length) else {} }}"

@@ -1,0 +1,5 @@
+# Managed by mysql-ha-lab (Ansible). Local edits are overwritten.
+[mariadbd]
+{% for key, value in mariadb_effective_config | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}
