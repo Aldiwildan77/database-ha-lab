@@ -11,7 +11,24 @@ Status: step 1 and part of step 2 are implemented (see "Implemented" below). Rol
 
 - Strategy traits in the descriptor (`family`, `failover`, `semi_sync`) replace the `ha_provider` name checks in `ha-health.yml`, `failover.yml`, `recover.yml`, the replication role and the benchmark context. The runner reads `auto_failover` from `context.json`.
 
-Still hard-coded: `DEFAULT_PORTS`/`resolve_ports` in `lab_config.py`, `mysql_*` variable names, the collectors, JMeter, and the roles' location under `ansible/roles/`.
+- Ports: each descriptor has a `ports` map (`default`, `standard`, `config` path in `ha.yml`, optional `span`) plus `primary_port` and `exporter_port`. The plugin keeps only the core ports (node_exporter, lab_collector, iperf). Port validation (range, distinct, span) runs over the descriptor's ports. `db_port` is the engine-neutral variable; `mysql_port` remains for the MySQL roles.
+
+Still hard-coded: `mysql_*` variable names, the collectors, JMeter, and the roles' location under `ansible/roles/`.
+
+## Planned default ports
+
+Every default differs from the product standard so the lab can sit next to an existing install. These are proposals for the engines that do not exist yet; each becomes the `ports` map of its descriptor.
+
+| Engine | Component | Standard | Lab default |
+|---|---|---|---|
+| MySQL (implemented) | server | 3306 | 13306 |
+| MariaDB | server | 3306 | 13306 (one engine per lab) |
+| MariaDB | Galera gcomm / IST / SST | 4567 / 4568 / 4444 | 14567 / 14568 / 14444 |
+| MariaDB | mysqld_exporter | 9104 | 19104 |
+| PostgreSQL | server | 5432 | 15432 |
+| PostgreSQL | postgres_exporter | 9187 | 19187 |
+| PostgreSQL | Patroni REST API | 8008 | 18008 |
+| PostgreSQL | etcd client / peer | 2379 / 2380 | 12379 / 12380 |
 
 ## Goal
 

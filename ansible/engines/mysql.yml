@@ -13,6 +13,21 @@ service: mysql
 process_names: [mysqld]
 helper_processes: [node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
 marker_dir: /etc/mysql           # .ha-lab-managed and .ha-lab-provider live here
+
+# Engine ports. default differs from the product standard so the lab can sit next to an existing install.
+#   config: dotted path in ha.yml that overrides the default
+#   span:   consecutive ports reserved (router RW port + 1 for read-only)
+primary_port: mysql             # port clients connect to
+exporter_port: mysql_exporter    # port of the engine metrics exporter
+ports:
+  mysql: {default: 13306, standard: 3306, config: mysql.port}
+  mysql_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
+  orchestrator_http: {default: 13000, standard: 3000, config: orchestrator.http_port}
+  orchestrator_raft: {default: 13008, standard: 10008, config: orchestrator.raft_port}
+  router_rw: {default: 16446, standard: 6446, config: innodb_cluster.router.rw_port, span: 2}
+  pxc_sst: {default: 14444, standard: 4444, config: percona_xtradb_cluster.sst_port}
+  pxc_gcomm: {default: 14567, standard: 4567, config: percona_xtradb_cluster.gcomm_port}
+  pxc_ist: {default: 14568, standard: 4568, config: percona_xtradb_cluster.ist_port}
 packages:
   default: [mysql-server, mysql-client]
   percona-xtradb-cluster: [percona-xtradb-cluster]

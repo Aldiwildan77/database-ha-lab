@@ -34,19 +34,12 @@ from ansible.errors import AnsibleParserError
 from ansible.plugins.inventory import BaseInventoryPlugin
 
 DEFAULT_ENGINE = "mysql"
-# Lab defaults deliberately differ from each product's standard port (3306, 9100, 9104, 3000, 6446,
-# 4567 ...) so the lab never collides with an existing installation on the same host.
-DEFAULT_PORTS = {
-    "mysql": 13306,
+# Core ports. Engine ports (database, engine exporter, HA components) come from ansible/engines/<engine>.yml.
+# Lab defaults deliberately differ from each product's standard port so the lab never collides with an
+# existing installation on the same host.
+CORE_PORTS = {
     "node_exporter": 19100,
-    "mysql_exporter": 19104,
     "lab_collector": 19106,
-    "orchestrator_http": 13000,
-    "orchestrator_raft": 13008,
-    "router_rw": 16446,          # read-only port is router_rw + 1
-    "pxc_sst": 14444,
-    "pxc_gcomm": 14567,
-    "pxc_ist": 14568,
     "iperf": 15201,
 }
 NODE_ROLES = {"primary", "replica"}
@@ -93,27 +86,26 @@ def mysql_host_pattern(cidr: str):
     return str(net.network_address) if net.prefixlen == 32 else f"{net.network_address}/{net.netmask}"
 
 
-def resolve_ports(ha: dict, mon: dict) -> dict:
-    """Effective lab ports: config value or the lab default."""
-    mysql = ha.get("mysql") or {}
+def _dig(data: dict, dotted: str):
+    for part in dotted.split("."):
+        if not isinstance(data, dict) or part not in data:
+            return None
+        data = data[part]
+    return data
+
+
+def resolve_ports(ha: dict, mon: dict, engine: dict) -> dict:
+    """Effective lab ports: config value or default (core ports plus the engine's own)."""
     hm = ha.get("monitoring") or {}
-    orch = ha.get("orchestrator") or {}
-    router = (ha.get("innodb_cluster") or {}).get("router") or {}
-    pxc = ha.get("percona_xtradb_cluster") or {}
-    d = DEFAULT_PORTS
-    return {
-        "mysql": mysql.get("port", d["mysql"]),
-        "node_exporter": hm.get("node_exporter_port", d["node_exporter"]),
-        "mysql_exporter": hm.get("mysql_exporter_port", d["mysql_exporter"]),
-        "lab_collector": hm.get("lab_collector_port", d["lab_collector"]),
-        "orchestrator_http": orch.get("http_port", d["orchestrator_http"]),
-        "orchestrator_raft": orch.get("raft_port", d["orchestrator_raft"]),
-        "router_rw": router.get("rw_port", d["router_rw"]),
-        "pxc_sst": pxc.get("sst_port", d["pxc_sst"]),
-        "pxc_gcomm": pxc.get("gcomm_port", d["pxc_gcomm"]),
-        "pxc_ist": pxc.get("ist_port", d["pxc_ist"]),
-        "iperf": (mon or {}).get("iperf_port", d["iperf"]),
+    ports = {
+        "node_exporter": hm.get("node_exporter_port", CORE_PORTS["node_exporter"]),
+        "lab_collector": hm.get("lab_collector_port", CORE_PORTS["lab_collector"]),
+        "iperf": (mon or {}).get("iperf_port", CORE_PORTS["iperf"]),
     }
+    for name, spec in (engine.get("ports") or {}).items():
+        value = _dig(ha, spec["config"]) if spec.get("config") else None
+        ports[name] = spec["default"] if value is None else value
+    return ports
 
 
 def port_value(token: str, ports: dict) -> int:
@@ -186,8 +178,8 @@ class InventoryModule(BaseInventoryPlugin):
         provider = ha["ha_provider"]
         strategy = engine["ha"][provider]
         router = (ha.get("innodb_cluster") or {}).get("router") or {}
-        ports = {k: int(v) for k, v in resolve_ports(ha, mon).items()}
-        mysql_port = ports["mysql"]
+        ports = {k: int(v) for k, v in resolve_ports(ha, mon, engine).items()}
+        mysql_port = ports[engine["primary_port"]]
         mesh_ports = [port_value(t, ports) for t in strategy["mesh_ports"]]
         client_ports = [port_value(t, ports) for t in strategy["client_ports"]]
         optional = strategy.get("optional_client_ports")
@@ -195,7 +187,7 @@ class InventoryModule(BaseInventoryPlugin):
             section = ha.get(provider.replace("-", "_")) or {}
             if (section.get(optional["feature"]) or {}).get("enabled", True):
                 client_ports += [port_value(t, ports) for t in optional["ports"]]
-        monitoring_ports = [ports["node_exporter"], ports["mysql_exporter"], ports["lab_collector"]]
+        monitoring_ports = [ports["node_exporter"], ports[engine["exporter_port"]], ports["lab_collector"]]
 
         self.inventory.add_group("mysql_nodes")
         all_vars = {
@@ -220,16 +212,17 @@ class InventoryModule(BaseInventoryPlugin):
             "mysql_version": str(mysql.get("version", engine["default_version"])),
             "mysql_port": mysql_port,
             "lab_ports": ports,
-            "orchestrator_http_port": ports["orchestrator_http"],
-            "orchestrator_raft_port": ports["orchestrator_raft"],
-            "router_rw_port": ports["router_rw"],
-            "pxc_sst_port": ports["pxc_sst"],
-            "pxc_gcomm_port": ports["pxc_gcomm"],
-            "pxc_ist_port": ports["pxc_ist"],
+            "orchestrator_http_port": ports.get("orchestrator_http"),
+            "orchestrator_raft_port": ports.get("orchestrator_raft"),
+            "router_rw_port": ports.get("router_rw"),
+            "pxc_sst_port": ports.get("pxc_sst"),
+            "pxc_gcomm_port": ports.get("pxc_gcomm"),
+            "pxc_ist_port": ports.get("pxc_ist"),
             "lab_iperf_port": ports["iperf"],
             "mysql_config": mysql.get("config") or {},
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
-            "mysql_exporter_port": ports["mysql_exporter"],
+            "mysql_exporter_port": ports.get("mysql_exporter"),
+            "db_port": mysql_port,
             "node_exporter_port": ports["node_exporter"],
             "lab_collector_port": ports["lab_collector"],
             "lab_monitoring": mon,
@@ -477,14 +470,14 @@ class InventoryModule(BaseInventoryPlugin):
         versions = (engine or {}).get("versions") or []
         if versions and str(mysql.get("version", engine["default_version"])) not in versions:
             errors.append(f"ha.yml: mysql.version must be one of {versions}")
-        ports = resolve_ports(ha, mon)
+        ports = resolve_ports(ha, mon, engine or {})
         for k, v in ports.items():
             if not isinstance(v, int) or isinstance(v, bool) or not (1024 <= v <= 65534):
                 errors.append(f"port '{k}' must be an integer between 1024 and 65534 (got {v!r})")
-        used_ports = [v for v in ports.values() if isinstance(v, int)] + (
-            [ports["router_rw"] + 1] if isinstance(ports["router_rw"], int) else [])
+        spans = {k: int(((engine or {}).get("ports") or {}).get(k, {}).get("span", 1)) for k in ports}
+        used_ports = [v + i for k, v in ports.items() if isinstance(v, int) for i in range(spans[k])]
         if len(set(used_ports)) != len(used_ports):
-            errors.append(f"lab ports must be distinct (router read-only port is rw_port + 1): {ports}")
+            errors.append(f"lab ports must be distinct (a span port reserves the next port too): {ports}")
 
         if mon:
             mode = mon.get("scrape_address", "ip")
