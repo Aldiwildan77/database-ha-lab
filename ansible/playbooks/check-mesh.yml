@@ -102,7 +102,7 @@
           {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item.0 ~ ':' ~ r.item.1 ~ ' TCP unreachable') -%}
           {%- endfor -%}
           {%- for r in mesh_login.results | default([]) if not (r.skipped | default(false)) and r.rc | default(1) != 0 -%}
-          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item ~ ' MySQL login as repl failed: '
+          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item ~ ' database login failed: '
                 ~ (r.stderr | default(r.msg | default('')) | regex_replace('mysql: \\[Warning\\][^\\n]*\\n?', '') | trim)) -%}
           {%- endfor -%}
           {{ out }}

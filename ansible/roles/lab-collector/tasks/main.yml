@@ -21,7 +21,7 @@
     group: "{{ lab_engine.collector.run_as }}"
     mode: "0600"
     content: "{{ lab_engine.collector.connect | combine({'engine': db_engine, 'password': db_exporter_password,
-                  'port': lab_collector_port, 'buckets': lab_collector_buckets}) | to_nice_json }}\n"
+                  'db_port': db_port, 'port': lab_collector_port, 'buckets': lab_collector_buckets}) | to_nice_json }}\n"
   no_log: true
   notify: Restart ha-lab-collector
 
