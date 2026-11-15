@@ -1,6 +1,6 @@
 # Database engines and HA strategies
 
-The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `galera` and `maxscale` and PostgreSQL's `patroni` are planned.
+The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `galera` and `maxscale` and PostgreSQL's `patroni` are planned. The runbook for each engine and strategy is in [ha/README.md](../../ha/README.md).
 
 ## Layout
 
@@ -50,6 +50,7 @@ The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each 
 |---|---|
 | `name`, `display`, `status` | `status: planned` blocks selection until the roles exist; the same key on one `ha.<strategy>` blocks only that strategy |
 | `config_section`, `versions`, `default_version` | Engine settings section in `ha.yml` (`mysql:`, `mariadb:`, `postgres:`); the same key under a node holds per-node server options |
+| `architectures` | CPU architectures `make validate` accepts (`ansible_architecture` values); default `[x86_64]` |
 | `service`, `process_names`, `helper_processes`, `marker_dir`, `config_file` | Used by host checks, faults and markers; `config_file` is the lab settings file |
 | `paths_written` | Paths provisioning writes, shown by `make plan-host` |
 | `packages`, `conflicting_packages`, `apt_repository` | Per strategy or `default`; used by `make plan-host` |

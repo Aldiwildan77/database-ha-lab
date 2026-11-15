@@ -1,5 +1,5 @@
 ---
-- name: Install exporters on MySQL nodes
+- name: Install exporters on database nodes
   hosts: db_nodes
   gather_facts: true
   become: true

@@ -2,7 +2,7 @@
   "uid": "lab-network",
   "title": "Network",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "network"
   ],
   "timezone": "browser",

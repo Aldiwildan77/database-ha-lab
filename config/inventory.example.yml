@@ -21,24 +21,24 @@ networks:
   # dc-lan:
   #   type: private
   #   interface: eth1          # interface carrying lab traffic (firewall, faults, PXC address)
-  #   cidrs: [10.20.0.0/16]    # subnet(s) of that network; also used for MySQL account host patterns
+  #   cidrs: [10.20.0.0/16]    # subnet(s) of that network; also used for database account host patterns
 
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
 # address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
-# Optional per node: network, server_id, tailscale_ip, mysql ({my.cnf option: value}), ssh overrides.
+# Optional per node: network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}), ssh overrides.
 nodes:
-  - name: mysql-01
-    address: mysql-01.example.ts.net
+  - name: db-01
+    address: db-01.example.ts.net
     role: primary
     datacenter: dc-01
 
-  - name: mysql-02
-    address: mysql-02.example.ts.net
+  - name: db-02
+    address: db-02.example.ts.net
     role: replica
     datacenter: dc-02
 
-  - name: mysql-03
-    address: mysql-03.example.ts.net
+  - name: db-03
+    address: db-03.example.ts.net
     role: replica
     datacenter: dc-03
     # network: dc-lan

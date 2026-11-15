@@ -59,7 +59,7 @@ If the old primary is still running (a network partition), `make promote` refuse
 ## Planned switchover
 
 ```bash
-make switchover NEW_PRIMARY=mysql-02
+make switchover NEW_PRIMARY=db-02
 ```
 
 1. The current primary is fenced with `super_read_only`.
@@ -71,7 +71,7 @@ No acknowledged transaction is lost. If anything fails before the promotion, the
 ## Recovery runbook (old primary returns)
 
 ```bash
-make recover NODE=mysql-01
+make recover NODE=db-01
 ```
 
 1. Starts MySQL on the node.

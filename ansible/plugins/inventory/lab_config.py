@@ -12,7 +12,7 @@ from __future__ import annotations
 
 DOCUMENTATION = r"""
 name: lab_config
-short_description: Build inventory from mysql-ha-lab config/*.yml
+short_description: Build inventory from database-ha-lab config/*.yml
 description:
   - Reads config/inventory.yml, config/ha.yml and config/monitoring.yml,
     validates them and exposes nodes as hosts in the C(db_nodes) group (alias C(mysql_nodes)).

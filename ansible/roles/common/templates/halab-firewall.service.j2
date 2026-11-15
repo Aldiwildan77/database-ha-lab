@@ -1,7 +1,7 @@
 [Unit]
-Description=mysql-ha-lab nftables table (lab ports only)
+Description=database-ha-lab nftables table (lab ports only)
 Wants=network-pre.target
-Before=network-pre.target mysql.service
+Before=network-pre.target mysql.service mariadb.service postgresql.service
 DefaultDependencies=no
 After=local-fs.target
 

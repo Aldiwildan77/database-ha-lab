@@ -39,10 +39,11 @@
         that:
           - (ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['22.04', '24.04'])
             or (ansible_distribution == 'Debian' and ansible_distribution_major_version == '12')
-          - ansible_architecture == 'x86_64'
+          - ansible_architecture in lab_engine.architectures | default(['x86_64'])
         fail_msg: >-
           {{ inventory_hostname }}: {{ ansible_distribution }} {{ ansible_distribution_version }}
-          {{ ansible_architecture }} is not supported (Ubuntu 22.04/24.04 or Debian 12, x86_64).
+          {{ ansible_architecture }} is not supported (Ubuntu 22.04/24.04 or Debian 12;
+          {{ db_engine }} on {{ lab_engine.architectures | default(['x86_64']) | join(', ') }}).
         quiet: true
 
     - name: Summary

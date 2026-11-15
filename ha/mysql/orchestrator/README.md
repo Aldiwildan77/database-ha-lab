@@ -56,7 +56,7 @@ orchestrator-client -c audit-recovery   # recovery history
 ## Planned switchover
 
 ```bash
-make switchover [NEW_PRIMARY=mysql-02]   # graceful-master-takeover-auto
+make switchover [NEW_PRIMARY=db-02]   # graceful-master-takeover-auto
 ```
 
 ## Monitoring

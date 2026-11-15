@@ -46,7 +46,7 @@ validate: validate-config ## Validate local tools, config, secrets, Tailscale, D
 plan-host: validate-config ## Read-only: what provisioning would change on each node, and conflicts
 	$(ansible) ansible/playbooks/check-host.yml
 
-provision: validate-config ## Install MySQL (or PXC) + exporters + collectors on all nodes (runs plan-host first)
+provision: validate-config ## Install the database engine + exporters + collectors on all nodes (runs plan-host first)
 	$(ansible) ansible/playbooks/provision.yml
 
 configure-exporters: validate-config ## (Re)install exporters and lab collectors only
@@ -86,7 +86,7 @@ probes-stop: ## Stop the local probe exporter
 	@local/scripts/probes.sh stop
 
 # ---------------------------------------------------------------- Network
-mesh-check: validate-config ## Full-mesh TCP + MySQL TLS login between nodes, and this machine to nodes
+mesh-check: validate-config ## Full-mesh TCP + database TLS login between nodes, and this machine to nodes
 	$(ansible) ansible/playbooks/check-mesh.yml
 
 network-check: validate-config ## Local-to-node DNS, tailscale ping and port checks
@@ -155,9 +155,9 @@ status: validate-config ## Inventory, monitoring, exporter health and topology
 	@local/scripts/health-check.sh || true
 	@$(ansible) ansible/playbooks/topology.yml || true
 
-destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=1 also purges MySQL and data)
+destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=1 also purges the database packages and data)
 	@env="$$(local/scripts/lab-var.sh lab_environment)"; prov="$$(local/scripts/lab-var.sh ha_provider)"; \
-	  echo "This removes the $$prov topology from all nodes$(if $(DATA), AND DELETES ALL MYSQL DATA AND PACKAGES)."; \
+	  echo "This removes the $$prov topology from all nodes$(if $(DATA), AND DELETES ALL DATABASE DATA AND PACKAGES)."; \
 	  printf "Type the environment name (%s) to confirm: " "$$env"; read -r answer; \
 	  [ -n "$$env" ] && [ "$$answer" = "$$env" ] || { echo "aborted"; exit 1; }; \
 	  $(ansible) ansible/playbooks/destroy-ha.yml -e confirm=$$env $(if $(DATA),-e destroy_data=true)

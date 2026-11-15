@@ -1,5 +1,5 @@
 #!/usr/sbin/nft -f
-# Managed by mysql-ha-lab (Ansible). Guards lab ports only; other traffic and other tables are untouched.
+# Managed by database-ha-lab (Ansible). Guards lab ports only; other traffic and other tables are untouched.
 # Remove with: systemctl disable --now halab-firewall && nft delete table inet halab
 {% set v4 = common_firewall_allowed_sources | reject('search', ':') | list %}
 {% set v6 = common_firewall_allowed_sources | select('search', ':') | list %}

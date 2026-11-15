@@ -21,7 +21,7 @@ make benchmark SCENARIO=spike-test J="spike_threads=128 spike_at=90"
 
 | `ENDPOINT` | Type | What it measures |
 |---|---|---|
-| `ha` (default) | HA endpoint | Client-facing HA behaviour. Uses MySQL Router on every node (innodb-cluster) or writable-node discovery across all nodes (other providers). |
+| `ha` (default) | HA endpoint | Client-facing HA behaviour. Uses MySQL Router on every node (innodb-cluster) or writable-node discovery across all nodes (every other strategy, on every engine). |
 | `primary` | direct | The node that is currently writable |
 | `<node>` | direct | One specific node, for isolated diagnostics |
 

@@ -2,7 +2,7 @@
   "uid": "lab-mysql-overview",
   "title": "MySQL Performance",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "mysql"
   ],
   "timezone": "browser",

@@ -3,9 +3,9 @@
 ## Architecture
 
 ```text
- client ──▶ router@mysql-01:16446 ┐
-        ──▶ router@mysql-02:16446 ├─▶ PRIMARY (writable) ◀─ group (Paxos) ─▶ SECONDARY, SECONDARY
-        ──▶ router@mysql-03:16446 ┘
+ client ──▶ router@db-01:16446 ┐
+        ──▶ router@db-02:16446 ├─▶ PRIMARY (writable) ◀─ group (Paxos) ─▶ SECONDARY, SECONDARY
+        ──▶ router@db-03:16446 ┘
 ```
 
 - MySQL 8.4 LTS, Group Replication in single-primary mode, managed with MySQL Shell's AdminAPI.
@@ -40,8 +40,8 @@ Re-running it is idempotent.
 ## Failover and recovery
 
 - **Automatic.** When the primary fails, the remaining majority elects a new primary, and the routers redirect within a few seconds. Expect roughly 5–10 s with default timeouts, plus the client reconnect.
-- **Planned switchover:** `make switchover NEW_PRIMARY=mysql-02`. This runs `cluster.setPrimaryInstance()`.
-- **Recovery:** `make recover NODE=mysql-01`. This starts MySQL and calls `cluster.rejoinInstance()` if the node does not come back ONLINE by itself.
+- **Planned switchover:** `make switchover NEW_PRIMARY=db-02`. This runs `cluster.setPrimaryInstance()`.
+- **Recovery:** `make recover NODE=db-01`. This starts MySQL and calls `cluster.rejoinInstance()` if the node does not come back ONLINE by itself.
 - **Loss of majority** (for example 2 of 3 members down): the group blocks writes. Restore with `dba.rebootClusterFromCompleteOutage()` or `cluster.forceQuorumUsingPartitionOf()`. These are manual and deliberate, and not automated here.
 
 ## Consistency

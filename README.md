@@ -22,7 +22,7 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 
 | Engine | Strategy | Failover | Min nodes | Tested |
 |---|---|---|---|---|
-| MySQL 8.4 (8.0) | `async-replication` | manual (`make failover`) | 2 | containers, end to end |
+| MySQL 8.4 (8.0) | `async-replication` | manual (`make promote`) | 2 | containers, end to end |
 | | `semi-sync` | manual | 2 | containers, end to end |
 | | `orchestrator` | Orchestrator (raft) | 3 | containers, end to end |
 | | `innodb-cluster` | Group Replication + MySQL Router | 3 (max 9) | containers, end to end |
@@ -36,7 +36,7 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 
 "End to end" means deploy, idempotent redeploy, health, switchover, unplanned failover, recover, ledger consistency and destroy, run against database containers with the Ansible Docker connection. None of it has run on a real Ubuntu host with systemd yet: package installs, service units and the firewall are untested there.
 
-Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See [docs/architecture/engines.md](docs/architecture/engines.md) for the layout and how to add an engine, and `ha/<provider>/` for the MySQL architecture runbooks.
+Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See [docs/architecture/engines.md](docs/architecture/engines.md) for the layout and how to add an engine, and [ha/README.md](ha/README.md) for the HA scenario runbooks of every engine.
 
 ## Requirements
 
@@ -77,7 +77,7 @@ make benchmark SCENARIO=mixed-workload
 make failover CONFIRM=yes      # failover experiment: RTO, RPO, consistency
 ```
 
-Open Grafana at http://127.0.0.1:3000. The user is `admin` and the password is in `local/compose/.env`. The **MySQL HA Lab** folder holds eight dashboards: HA Overview, Latency Breakdown, Network, MySQL Performance, Replication & HA, Host & Storage, JMeter Benchmark, and Failover & Recovery. All except MySQL Performance use engine-neutral metrics; there is no MariaDB- or PostgreSQL-specific dashboard yet.
+Open Grafana at http://127.0.0.1:3000. The user is `admin` and the password is in `local/compose/.env`. The **Database HA Lab** folder holds eight dashboards: HA Overview, Latency Breakdown, Network, MySQL Performance, Replication & HA, Host & Storage, JMeter Benchmark, and Failover & Recovery. All except MySQL Performance use engine-neutral metrics; there is no MariaDB- or PostgreSQL-specific dashboard yet.
 
 ## Configuration
 
@@ -174,7 +174,7 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 config/            user configuration (*.example.yml committed, real files gitignored)
 ansible/           inventory plugin, engine-neutral playbooks and core roles (common, node-exporter, lab-collector)
 ansible/engines/   one folder per engine: descriptor, roles and hooks (mysql, mariadb, postgres)
-ha/<provider>/     architecture, runbooks and limitations per MySQL HA provider
+ha/<engine>/<strategy>/  architecture, runbooks and limitations per HA scenario
 local/             Prometheus, Grafana (dashboards + generator), compose, helper scripts
 metrics/           collector loader + one module per engine, metric schema, recording rules
 jmeter/            scenarios (generated), Groovy sampler, per-engine SQL dialects and JDBC drivers, installer

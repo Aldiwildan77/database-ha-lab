@@ -9,6 +9,7 @@ display: MySQL
 config_section: mysql            # ha.yml section for engine settings
 versions: ["8.0", "8.4"]
 default_version: "8.4"
+architectures: [x86_64]   # repo.mysql.com publishes amd64 packages only
 service: mysql
 process_names: [mysqld]
 helper_processes: [node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]

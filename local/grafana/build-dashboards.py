@@ -47,7 +47,7 @@ class D:
                          "options": {"mode": "markdown", "content": content}})
         s.id += 1; s.x += w; s.h = h
     def save(s, path, uid, title, tags, metric, templating=None):
-        d = {"uid": uid, "title": title, "tags": ["mysql-ha-lab"] + tags, "timezone": "browser",
+        d = {"uid": uid, "title": title, "tags": ["database-ha-lab"] + tags, "timezone": "browser",
              "schemaVersion": 39, "version": 1, "editable": False, "refresh": "30s",
              "time": {"from": "now-1h", "to": "now"}, "graphTooltip": 1,
              "templating": {"list": templating if templating is not None else tvars(metric)},

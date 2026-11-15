@@ -7,6 +7,7 @@ status: ready
 config_section: mariadb
 versions: ["10.11", "11.4", "11.8"]
 default_version: "11.4"
+architectures: [x86_64, aarch64]
 service: mariadb
 process_names: [mariadbd]
 helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]

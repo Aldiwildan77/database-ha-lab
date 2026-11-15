@@ -6,6 +6,7 @@ status: ready
 config_section: postgres
 versions: ["16", "17", "18"]
 default_version: "17"
+architectures: [x86_64, aarch64]
 service: postgresql
 process_names: [postgres]
 helper_processes: [node_exporter, postgres_exporter, python3, patroni, etcd]

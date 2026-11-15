@@ -1,10 +1,10 @@
 ---
 # Full-mesh connectivity check for the selected HA provider.
-#   node -> every peer: TCP on lab_mesh_tcp_ports (MySQL, GR, Galera, orchestrator ...)
-#   node -> every peer: MySQL login as the replication account over TLS (when MySQL runs)
-#   this machine -> every node: client ports (MySQL / Router) and monitoring ports
+#   node -> every peer: TCP on lab_mesh_tcp_ports (database, GR, Galera, orchestrator ...)
+#   node -> every peer: database login as the replication account over TLS (engine hook mesh-login, when the database runs)
+#   this machine -> every node: client ports (database / proxy) and monitoring ports
 # Ports with no service yet get a temporary listener, so routing and firewall rules are tested
-# before MySQL or the HA software exists.
+# before the database or the HA software exists.
 - name: Prepare temporary listeners
   hosts: db_nodes
   gather_facts: false
@@ -154,7 +154,7 @@
       ansible.builtin.debug:
         msg: >-
           node-to-node: {{ (groups['db_nodes'] | length) * (groups['db_nodes'] | length - 1) }} pairs x
-          TCP {{ lab_mesh_tcp_ports }}, plus MySQL TLS login where MySQL runs;
+          TCP {{ lab_mesh_tcp_ports }}, plus database TLS login where the database runs;
           local-to-node: TCP {{ lab_client_tcp_ports + lab_monitoring_tcp_ports }}.
           {{ ('UDP ' ~ lab_mesh_udp_ports ~ ' cannot be verified by TCP connect; confirm those firewall rules manually.') if lab_mesh_udp_ports else '' }}
 

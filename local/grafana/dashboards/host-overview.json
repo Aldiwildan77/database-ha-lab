@@ -2,7 +2,7 @@
   "uid": "lab-host-overview",
   "title": "Host & Storage Overview",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "host"
   ],
   "timezone": "browser",

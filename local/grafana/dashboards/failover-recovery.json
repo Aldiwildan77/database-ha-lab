@@ -2,7 +2,7 @@
   "uid": "lab-failover",
   "title": "Failover & Recovery",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "failover"
   ],
   "timezone": "browser",

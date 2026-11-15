@@ -3,7 +3,7 @@
 # may not resolve MagicDNS). fqdn: scrape by node address as written in inventory.yml.
 scrape_address: ip
 
-# Extra sources allowed to reach MySQL, exporters and HA ports, on top of every node network's cidrs
+# Extra sources allowed to reach the database, exporters and HA ports, on top of every node network's cidrs
 # (which are always allowed so nodes can replicate). Add this machine's network when it is not on one
 # of the node networks, e.g. [192.168.10.0/24] or a VPN client range.
 allowed_sources: []

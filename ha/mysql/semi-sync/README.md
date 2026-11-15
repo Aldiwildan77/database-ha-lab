@@ -27,9 +27,9 @@ So **semi-sync does not by itself guarantee zero data loss.** The benchmark meas
 
 ```bash
 make ha HA=semi-sync
-make switchover NEW_PRIMARY=mysql-02   # semi-sync source/replica roles move with the primary
+make switchover NEW_PRIMARY=db-02   # semi-sync source/replica roles move with the primary
 make promote
-make recover NODE=mysql-01
+make recover NODE=db-01
 ```
 
 The runbooks are the async-replication runbooks. The playbooks also move the semi-sync roles: the new primary gets source ON and replica OFF, and every other node gets the reverse.

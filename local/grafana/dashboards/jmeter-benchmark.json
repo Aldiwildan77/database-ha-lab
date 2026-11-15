@@ -2,7 +2,7 @@
   "uid": "lab-jmeter",
   "title": "JMeter Benchmark",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "benchmark"
   ],
   "timezone": "browser",

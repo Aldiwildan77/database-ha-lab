@@ -2,7 +2,7 @@
 """Node-to-node network probe. Run periodically (systemd timer); writes a node_exporter textfile.
 
 Config /etc/ha-lab/network-probe.json:
-  {"self": "mysql-01", "port": 3306, "peers": [{"name": "mysql-02", "address": "100.x", "datacenter": "dc-02"}],
+  {"self": "db-01", "port": 13306, "peers": [{"name": "db-02", "address": "100.x", "datacenter": "dc-02"}],
    "textfile": "/var/lib/node_exporter/textfile/ha_lab_network.prom", "state": "/var/lib/ha-lab/network-state.json"}
 """
 

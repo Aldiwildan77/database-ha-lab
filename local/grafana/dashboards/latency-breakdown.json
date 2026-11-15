@@ -2,7 +2,7 @@
   "uid": "lab-latency-breakdown",
   "title": "Latency Breakdown",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "latency"
   ],
   "timezone": "browser",

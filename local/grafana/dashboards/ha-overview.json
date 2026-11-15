@@ -2,7 +2,7 @@
   "uid": "lab-ha-overview",
   "title": "HA Overview",
   "tags": [
-    "mysql-ha-lab",
+    "database-ha-lab",
     "ha"
   ],
   "timezone": "browser",

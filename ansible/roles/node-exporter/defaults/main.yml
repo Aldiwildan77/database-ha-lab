@@ -12,4 +12,4 @@ node_exporter_flags:
   - "--web.listen-address=:{{ node_exporter_port }}"
   - "--collector.textfile.directory={{ node_exporter_textfile_dir }}"
   - "--collector.systemd"
-  - "--collector.systemd.unit-include=(mysql|mariadb|mysqld_exporter|node_exporter|chrony|tailscaled)\\.service"
+  - "--collector.systemd.unit-include=(mysql|mariadb|postgresql|postgresql@.+|mysqld_exporter|postgres_exporter|node_exporter|chrony|tailscaled)\\.service"

@@ -6,14 +6,13 @@
 # A planned engine or strategy is refused at validate time until its roles exist.
 db_engine: mysql
 
-# mysql:    async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
-# postgres: streaming-replication | sync-replication
+# Strategies per engine are listed above; ha/README.md documents each one.
 # Provisioning installs the server packages; `make ha` builds the topology.
 # percona-xtradb-cluster installs Percona packages instead of Oracle MySQL and forms the cluster during provisioning.
 ha_provider: async-replication
 
 # Every lab port defaults to a value that differs from the product's standard port, so the lab can
-# sit next to an existing MySQL, exporter or Galera on the same host. All are overridable below.
+# sit next to an existing database server, exporter or Galera on the same host. All are overridable below.
 mysql:
   version: "8.4"            # "8.4" or "8.0"
   port: 13306               # standard is 3306
@@ -45,12 +44,12 @@ sync_replication:
 monitoring:
   enabled: true
   node_exporter_port: 19100   # standard 9100
-  mysql_exporter_port: 19104  # standard 9104
+  mysql_exporter_port: 19104  # standard 9104; mysqld_exporter for MySQL and MariaDB
   postgres_exporter_port: 19187  # standard 9187
   lab_collector_port: 19106
 
 replication:
-  ssl: true                      # replication channel uses TLS (MySQL auto-generated certs)
+  ssl: true                      # MySQL/MariaDB replication channel uses TLS (auto-generated certs); PostgreSQL always does
 
 semi_sync:
   wait_for_replica_count: 1      # rpl_semi_sync_source_wait_for_replica_count (MariaDB: must be 1)
