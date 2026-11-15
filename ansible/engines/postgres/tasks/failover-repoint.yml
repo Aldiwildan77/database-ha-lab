@@ -1,0 +1,12 @@
+---
+# PostgreSQL hook for failover.yml (manual failover). Points every node that was up at fo_new_primary: running standbys
+# change primary_conninfo and follow the new timeline; the old primary, stopped as the fence, starts as a standby.
+- name: Repoint reachable nodes to the new primary
+  ansible.builtin.include_role:
+    name: postgres-replication
+    tasks_from: standby
+  vars:
+    replication_primary: "{{ fo_new_primary }}"
+  when:
+    - lab_topo.db_up
+    - inventory_hostname != fo_new_primary

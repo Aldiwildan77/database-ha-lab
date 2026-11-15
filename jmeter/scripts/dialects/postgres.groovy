@@ -1,5 +1,4 @@
-// PostgreSQL dialect. UNTESTED: the postgres engine is planned (see ansible/engines/postgres/engine.yml).
-// Errors are classified by SQLSTATE, not by vendor code.
+// PostgreSQL dialect. Errors are classified by SQLSTATE, not by vendor code.
 class LabDialect {
     String url(String hostPort, String db, Properties p) {
         int connectS = Math.max(1, (int) (Long.parseLong(p.getProperty('connect_timeout_ms', '3000')) / 1000))
@@ -11,7 +10,8 @@ class LabDialect {
 
     String adminDatabase() { return 'postgres' }
 
-    String roQuery() { return "SELECT CASE WHEN pg_is_in_recovery() THEN 1 ELSE 0 END, COALESCE(inet_server_addr()::text, 'local')" }
+    // cluster_name is set to the node's address by the postgres role, so served_by matches the inventory.
+    String roQuery() { return "SELECT CASE WHEN pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on' THEN 1 ELSE 0 END, current_setting('cluster_name')" }
 
     String now() { return 'clock_timestamp()' }
 
@@ -48,6 +48,8 @@ class LabDialect {
             case '23505': return 'duplicate'
             case '40001': return 'conflict'
             case '57P03': return 'not_ready'
+            case '57P01':
+            case '57P02': return 'connection'
         }
         return null
     }

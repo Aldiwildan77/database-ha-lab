@@ -1,0 +1,4 @@
+# Managed by database-ha-lab. Do not edit; set options under postgres.config in config/ha.yml.
+{% for key, value in postgres_effective_config | dictsort %}
+{{ key }} = '{{ value }}'
+{% endfor %}

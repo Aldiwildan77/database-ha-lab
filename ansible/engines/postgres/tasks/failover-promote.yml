@@ -1,0 +1,33 @@
+---
+# PostgreSQL hook for failover.yml (manual failover). Promotes fo_new_primary and detaches it from the old primary.
+- name: Promote the new primary
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  when: inventory_hostname == fo_new_primary
+  block:
+    - name: Promote
+      community.postgresql.postgresql_query:
+        query: SELECT pg_promote(true, 60) AS promoted
+        autocommit: true
+      register: fo_promote
+
+    - name: Require the promotion to complete
+      ansible.builtin.assert:
+        that: fo_promote.query_result[0].promoted
+        fail_msg: "{{ inventory_hostname }} did not leave recovery within 60 seconds"
+        quiet: true
+
+    - name: Forget the old primary
+      args: "{{ pg_conn }}"
+      community.postgresql.postgresql_alter_system:
+        param: primary_conninfo
+        value: _RESET
+
+    # pg_rewind of the old primary needs a checkpoint after the promotion.
+    - name: Checkpoint
+      community.postgresql.postgresql_query:
+        query: CHECKPOINT
+        autocommit: true
+      changed_when: true

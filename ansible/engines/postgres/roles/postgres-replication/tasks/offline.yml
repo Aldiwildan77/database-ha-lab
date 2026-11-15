@@ -1,0 +1,47 @@
+---
+# Cluster is stopped: write standby.signal and primary_conninfo, then start it. The data must have been shut down
+# cleanly and must not have diverged from the primary; otherwise run recover.yml, which uses pg_rewind.
+- name: Read the control file
+  ansible.builtin.command:
+    argv: ["{{ pg_bin_dir }}/pg_controldata", -D, "{{ pg_data_dir }}"]
+  register: replication_control
+  changed_when: false
+
+- name: Require a clean shutdown
+  ansible.builtin.assert:
+    that: replication_state_now in ['shut down', 'shut down in recovery']
+    fail_msg: >-
+      {{ inventory_hostname }} was not shut down cleanly ({{ replication_state_now }}).
+      Run recover.yml -e node={{ inventory_hostname }} so it is rewound before it follows {{ replication_primary }}.
+    quiet: true
+  vars:
+    replication_state_now: "{{ replication_control.stdout | regex_search('Database cluster state:[^\\n]*') | regex_replace('^Database cluster state:\\s*', '') | trim }}"
+  when: not (replication_fresh_copy | default(false))
+
+- name: Mark the node as a standby
+  ansible.builtin.copy:
+    dest: "{{ pg_data_dir }}/standby.signal"
+    content: ""
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    force: false
+
+- name: Write primary_conninfo
+  ansible.builtin.lineinfile:
+    path: "{{ pg_data_dir }}/postgresql.auto.conf"
+    regexp: '^primary_conninfo\s*='
+    line: "primary_conninfo = '{{ replication_conninfo }}'"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+
+- name: Start the standby
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", start]
+  changed_when: true
+
+- name: Wait for the PostgreSQL socket
+  ansible.builtin.wait_for:
+    path: "{{ pg_socket_dir }}/.s.PGSQL.{{ pg_port }}"
+    timeout: 120

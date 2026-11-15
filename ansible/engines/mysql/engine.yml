@@ -35,6 +35,7 @@ report_queries:
   seconds_behind_source_max:
     query: "max_over_time(mysql_slave_status_seconds_behind_source[{d}]) or max_over_time(mysql_slave_status_seconds_behind_master[{d}])"
     unit: s
+paths_written: [/etc/mysql/mysql.conf.d/zz-ha-lab.cnf, /etc/ha-lab, /etc/halab, /opt/ha-lab, /opt/node_exporter-*, /opt/mysqld_exporter-*, /var/lib/node_exporter/textfile]
 ports:
   mysql: {default: 13306, standard: 3306, config: mysql.port}
   mysql_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}

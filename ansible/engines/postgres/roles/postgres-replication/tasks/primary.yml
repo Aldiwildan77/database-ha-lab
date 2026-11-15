@@ -1,0 +1,17 @@
+---
+- name: Read primary state
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT pg_is_in_recovery() AS in_recovery, current_setting('primary_conninfo') AS conninfo
+  register: replication_primary_state
+  changed_when: false
+
+- name: Refuse a primary that is itself a standby
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is a standby of {{ replication_primary_state.query_result[0].conninfo }}.
+      Run make destroy, or failover.yml and recover.yml, before rebuilding with it as primary.
+  when: replication_primary_state.query_result[0].in_recovery

@@ -1,0 +1,8 @@
+# Managed by database-ha-lab.
+# TYPE  DATABASE     USER        ADDRESS         METHOD
+local   all          postgres                    peer
+local   all          {{ pg_exporter_user }}      scram-sha-256
+{% for cidr in postgres_hba_sources %}
+{{ postgres_hba_type }}  replication  {{ pg_replication_user }}  {{ cidr }}  scram-sha-256
+{{ postgres_hba_type }}  all          {{ pg_benchmark_user }},{{ pg_rewind_user }}  {{ cidr }}  scram-sha-256
+{% endfor %}

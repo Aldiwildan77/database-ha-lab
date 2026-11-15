@@ -1,0 +1,42 @@
+---
+- name: Write the synchronous replication settings
+  ansible.builtin.copy:
+    dest: "{{ replication_sync_file }}"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+    content: |
+      # Managed by database-ha-lab.
+      synchronous_standby_names = 'ANY {{ replication_num_sync }} ({% for n in groups['db_nodes'] | difference([inventory_hostname]) | sort %}"{{ n }}"{{ ', ' if not loop.last }}{% endfor %})'
+      synchronous_commit = '{{ replication_commit_level }}'
+  register: replication_sync_conf
+  when: replication_sync | bool
+
+- name: Remove the synchronous replication settings
+  ansible.builtin.file:
+    path: "{{ replication_sync_file }}"
+    state: absent
+  register: replication_async_conf
+  when: not (replication_sync | bool)
+
+- name: Reload the configuration
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", reload]
+  changed_when: true
+  when: replication_sync_conf.changed | default(false) or replication_async_conf.changed | default(false)
+
+- name: Wait for the required synchronous standbys
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT count(*) AS n FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum')
+  register: replication_sync_state
+  until: replication_sync_state.query_result[0].n | int >= replication_num_sync | int
+  retries: "{{ replication_wait_retries }}"
+  delay: "{{ replication_wait_delay }}"
+  changed_when: false
+  when:
+    - replication_sync | bool
+    - inventory_hostname == replication_primary

@@ -1,0 +1,42 @@
+---
+# PostgreSQL hook for destroy-ha.yml with destroy_data=true. Drops the lab's own cluster and, when no other cluster
+# is left on the host, purges the PostgreSQL packages. Other clusters are never touched.
+- name: Read the lab ownership marker
+  ansible.builtin.stat:
+    path: "{{ pg_marker_file }}"
+  register: destroy_marker
+
+- name: Drop the lab cluster
+  ansible.builtin.command:
+    argv: [pg_dropcluster, --stop, "{{ pg_version }}", "{{ pg_cluster }}"]
+    removes: "{{ pg_data_dir }}/PG_VERSION"
+  when: destroy_marker.stat.exists
+
+- name: List remaining clusters
+  ansible.builtin.command: pg_lsclusters --no-header
+  register: destroy_clusters
+  changed_when: false
+  failed_when: false
+
+- name: Purge PostgreSQL packages when no other cluster remains
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ pg_version }}"
+      - "postgresql-client-{{ pg_version }}"
+      - postgresql-common
+      - postgresql-client-common
+    state: absent
+    purge: true
+    autoremove: true
+  when: destroy_marker.stat.exists and destroy_clusters.stdout | trim == ''
+
+- name: Delete lab files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ pg_marker_file }}"
+    - "{{ pg_passfile }}"
+    - /etc/postgres_exporter
+    - /etc/apt/preferences.d/postgresql
+  when: destroy_marker.stat.exists

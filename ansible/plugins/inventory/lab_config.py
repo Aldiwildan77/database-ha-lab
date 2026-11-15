@@ -168,6 +168,7 @@ class InventoryModule(BaseInventoryPlugin):
         ssh = inv.get("ssh") or {}
         section = engine.get("config_section", "mysql")
         mysql = ha.get(section) or {}
+        engine_cfg = mysql
         ha_mon = ha.get("monitoring") or {}
 
         used = {n["_network"] for n in nodes}
@@ -222,7 +223,8 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_monitoring_tcp_ports": monitoring_ports if bool(ha_mon.get("enabled", True)) else [],
             "mysql_client_hosts": client_hosts,
             "ha_provider": ha["ha_provider"],
-            "mysql_version": str(mysql.get("version", engine["default_version"])),
+            "db_version": str(engine_cfg.get("version", engine["default_version"])),
+            "mysql_version": str(engine_cfg.get("version", engine["default_version"])),
             "mysql_port": mysql_port,
             "lab_ports": ports,
             "orchestrator_http_port": ports.get("orchestrator_http"),
@@ -233,6 +235,7 @@ class InventoryModule(BaseInventoryPlugin):
             "pxc_ist_port": ports.get("pxc_ist"),
             "lab_iperf_port": ports["iperf"],
             "mysql_config": mysql.get("config") or {},
+            "db_config": engine_cfg.get("config") or {},
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
             "mysql_exporter_port": ports[engine["exporter_port"]],
             "lab_engine_settings": mysql,
@@ -287,6 +290,7 @@ class InventoryModule(BaseInventoryPlugin):
                 "node_server_id": int(node.get("server_id", idx)),
                 "node_tailscale_ip": node.get("tailscale_ip", ""),
                 "mysql_node_config": node.get(section) or {},
+                "db_node_config": node.get(section) or {},
             }
             if node_ssh.get("private_key"):
                 hostvars["ansible_ssh_private_key_file"] = os.path.expanduser(node_ssh["private_key"])
@@ -468,9 +472,10 @@ class InventoryModule(BaseInventoryPlugin):
                 if tip in ips:
                     errors.append(f"{where}: duplicate tailscale_ip '{tip}'")
                 ips.add(tip)
-            node_section = (engines.get(engine_name) or {}).get("config_section", "mysql")
-            if node.get(node_section) is not None and not isinstance(node.get(node_section), dict):
-                errors.append(f"{where}: {node_section} overrides must be a mapping of server config options")
+            section = (engines.get(engine_name) or {}).get("config_section", "mysql")
+            for key in {"mysql", section}:
+                if node.get(key) is not None and not isinstance(node.get(key), dict):
+                    errors.append(f"{where}: {key} overrides must be a mapping of server options")
             if node.get("ssh") is not None and not isinstance(node.get("ssh"), dict):
                 errors.append(f"{where}: ssh overrides must be a mapping")
 
@@ -484,11 +489,11 @@ class InventoryModule(BaseInventoryPlugin):
                           f"{sorted(n for n, e in engines.items() if e.get('status') != 'planned')}")
         elif provider not in engine["ha"]:
             errors.append(f"ha.yml: ha_provider '{provider}' is not supported by {engine_name}; "
-                          f"choose one of {sorted(engine['ha'])}")
+                          f"choose one of {sorted(s for s, v in engine['ha'].items() if v.get('status') != 'planned')}")
         elif engine["ha"][provider].get("status") == "planned":
-            errors.append(f"ha.yml: ha_provider '{provider}' is planned for {engine_name}: its roles are not "
-                          f"implemented yet. Ready strategies: "
-                          f"{sorted(k for k, v in engine['ha'].items() if v.get('status') != 'planned')}")
+            errors.append(f"ha.yml: ha_provider '{provider}' is planned for {engine_name}: its descriptor defines it, "
+                          f"but its roles are not implemented yet. Implemented: "
+                          f"{sorted(s for s, v in engine['ha'].items() if v.get('status') != 'planned')}")
         else:
             strategy = engine["ha"][provider]
             lo, hi = strategy["min_nodes"], strategy.get("max_nodes")
@@ -548,7 +553,7 @@ class InventoryModule(BaseInventoryPlugin):
                 errors.append("monitoring.yml: firewall.backend must be nftables, ufw or none")
             if fw and (not fw.get("manage", True) or fw.get("backend") == "none"):
                 warnings.append(
-                    "monitoring.yml: the lab does not manage the firewall; MySQL and exporters listen on all "
+                    "monitoring.yml: the lab does not manage the firewall; the database and exporters listen on all "
                     "interfaces, so restrict them with your own ACLs (make mesh-check still verifies reachability)"
                 )
             for cidr in mon.get("allowed_sources") or []:

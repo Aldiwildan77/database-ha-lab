@@ -1,0 +1,71 @@
+---
+- name: Require exporter password
+  ansible.builtin.assert:
+    that: db_exporter_password | length >= 16
+    fail_msg: Set db_exporter_password (>= 16 chars) in config/secrets.yml or LAB_DB_EXPORTER_PASSWORD.
+    quiet: true
+  no_log: true
+
+- name: Create postgres_exporter system user
+  ansible.builtin.user:
+    name: postgres_exporter
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create install and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ postgres_exporter_install_dir }}", owner: root, mode: "0755" }
+    - { path: "{{ postgres_exporter_env_file | dirname }}", owner: postgres_exporter, mode: "0750" }
+
+- name: Download postgres_exporter (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ postgres_exporter_url }}/{{ postgres_exporter_release }}.tar.gz"
+    dest: "/tmp/{{ postgres_exporter_release }}.tar.gz"
+    checksum: "sha256:{{ postgres_exporter_url }}/sha256sums.txt"
+    mode: "0644"
+
+- name: Unpack postgres_exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ postgres_exporter_release }}.tar.gz"
+    dest: "{{ postgres_exporter_install_dir }}"
+    remote_src: true
+    extra_opts: [--strip-components=1]
+    creates: "{{ postgres_exporter_install_dir }}/postgres_exporter"
+
+- name: Link postgres_exporter binary
+  ansible.builtin.file:
+    src: "{{ postgres_exporter_install_dir }}/postgres_exporter"
+    dest: /usr/local/bin/postgres_exporter
+    state: link
+  notify: Restart postgres_exporter
+
+- name: Write exporter credentials
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ postgres_exporter_env_file }}"
+    owner: postgres_exporter
+    group: postgres_exporter
+    mode: "0600"
+  no_log: true
+  notify: Restart postgres_exporter
+
+- name: Install postgres_exporter unit
+  ansible.builtin.template:
+    src: postgres_exporter.service.j2
+    dest: /etc/systemd/system/postgres_exporter.service
+    mode: "0644"
+  notify: Restart postgres_exporter
+
+- name: Start postgres_exporter
+  ansible.builtin.systemd_service:
+    name: postgres_exporter
+    state: started
+    enabled: true
+    daemon_reload: true

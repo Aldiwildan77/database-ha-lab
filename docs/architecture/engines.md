@@ -1,6 +1,6 @@
 # Database engines and HA strategies
 
-The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`; its `galera` and `maxscale` strategies and PostgreSQL are planned.
+The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `galera` and `maxscale` and PostgreSQL's `patroni` are planned.
 
 ## Layout
 
@@ -16,7 +16,10 @@ ansible/
       engine.yml           descriptor; galera and maxscale are status: planned
       roles/               mariadb, mariadb-replication (reuses mysql-exporter)
       tasks/               hooks
-    postgres/engine.yml    planned
+    postgres/              ready (streaming-replication, sync-replication)
+      engine.yml           descriptor; patroni is status: planned
+      roles/               postgres, postgres-replication, postgres-exporter
+      tasks/               hooks
   roles/                   core roles: common (firewall), node-exporter, lab-collector
   playbooks/, tasks/       core: engine-neutral, call the engine's roles and hooks
 jmeter/
@@ -46,8 +49,9 @@ The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each 
 | Key | Purpose |
 |---|---|
 | `name`, `display`, `status` | `status: planned` blocks selection until the roles exist; the same key on one `ha.<strategy>` blocks only that strategy |
-| `config_section`, `versions`, `default_version` | Engine settings section in `ha.yml` (`mysql:`, `mariadb:`); the same key under a node holds per-node server options |
-| `service`, `process_names`, `helper_processes`, `marker_dir`, `config_file` | Used by host checks, faults and markers; `config_file` is the lab settings file shown by `make plan-host` |
+| `config_section`, `versions`, `default_version` | Engine settings section in `ha.yml` (`mysql:`, `mariadb:`, `postgres:`); the same key under a node holds per-node server options |
+| `service`, `process_names`, `helper_processes`, `marker_dir`, `config_file` | Used by host checks, faults and markers; `config_file` is the lab settings file |
+| `paths_written` | Paths provisioning writes, shown by `make plan-host` |
 | `packages`, `conflicting_packages`, `apt_repository` | Per strategy or `default`; used by `make plan-host` |
 | `ports`, `primary_port`, `exporter_port` | Lab defaults that differ from the product standard; `config` names the `ha.yml` override; `span` reserves consecutive ports |
 | `exporter` | Role that installs it, its name, and its "up" metric |
@@ -86,7 +90,7 @@ Core playbooks call these task files in `ansible/engines/<engine>/tasks/`. Each 
 ## Neutral names
 
 - Inventory group: `db_nodes`. `mysql_nodes` remains as an alias.
-- Variables: `db_engine`, `db_port`, `db_exporter_port`, `lab_engine`, `lab_ha_strategy`, `lab_ha_endpoint`, `lab_engine_tasks`. MySQL roles keep their own `mysql_*` variables.
+- Variables: `db_engine`, `db_version`, `db_port`, `db_exporter_port`, `db_config`, `db_node_config`, `lab_engine`, `lab_ha_strategy`, `lab_ha_endpoint`, `lab_engine_tasks`. MySQL roles keep their own `mysql_*` variables; PostgreSQL roles and hooks share the `pg_*` names in `ansible/inventory/group_vars/all/postgres.yml`.
 - Secrets: `db_exporter_password`, `db_replication_password`, `db_benchmark_password`, `db_admin_password` (env `LAB_DB_*_PASSWORD`). The older `mysql_*` keys and `LAB_MYSQL_*` env vars are still read.
 - Metrics: `ha_lab_db_up`, `ha_lab_writable`, `ha_lab_read_only`, `ha_lab_replication_position`; the Prometheus job is `db`; the availability alert is `DatabaseDown`.
 - Faults: `stop-db`, `kill-db` (`stop-mysql` and `kill-mysql` are aliases).
@@ -94,7 +98,7 @@ Core playbooks call these task files in `ansible/engines/<engine>/tasks/`. Each 
 
 ## Adding an engine
 
-1. Write `ansible/engines/<engine>/engine.yml` (copy the MySQL one) with `status: planned`.
+1. Write `ansible/engines/<engine>/engine.yml` (copy the MySQL one) with `status: planned`. Add `ansible.collections` the roles need to `requirements.yml` (pinned).
 2. Add the roles under `ansible/engines/<engine>/roles/` and every hook in `tasks/`.
 3. Add `metrics/collectors/engine_<engine>.py` (class `Collector(cfg)` with `.lock` and `.collect(registry)` that emits the neutral metrics).
 4. Add `jmeter/scripts/dialects/<engine>.groovy` and `jmeter/drivers/<engine>.env`.
@@ -115,16 +119,47 @@ How it differs from MySQL:
 - Promotion safety: the hook waits until each candidate's `gtid_current_pos` reaches the old primary's (or the last position the replica received), then picks a candidate that is at or ahead of every other candidate in every domain. When none is, it refuses. `MASTER_GTID_WAIT` is not used: it follows `gtid_slave_pos`, which stays behind on a node that was primary earlier.
 - The shared `mysql-exporter` role is reused. `ansible.mysql` 5.x warns that its MariaDB support ends in 6.0.0; `requirements.yml` pins 5.2.1.
 
-## Planned strategies and engines
+## PostgreSQL
+
+PostgreSQL 16, 17 (default) or 18 from the PGDG apt repository (`apt.postgresql.org`), pinned so only `postgresql*` packages come from it. The lab owns a cluster named `halab` (`pg_createcluster 17 halab --port 15432`, `/etc/postgresql/17/halab`) and never touches other clusters: it refuses a `halab` cluster it did not create (`-e postgres_adopt_existing=true` overrides), and `make destroy DATA=1` drops only `halab` and purges the packages only when no other cluster remains. The package's default `main` cluster is suppressed while the server package is installed.
+
+Settings: `postgres.version`, `postgres.port`, `postgres.shared_buffers_ratio`, `postgres.config` (extra `postgresql.conf` options) and `sync_replication.num_sync` / `commit_level` in `config/ha.yml`; `postgres_exporter_port` under `monitoring`. Data checksums and `wal_log_hints` are on, so `pg_rewind` works.
+
+| Strategy | Failover | Notes |
+|---|---|---|
+| streaming-replication | manual | asynchronous physical streaming; client picks the writable node (`pg_is_in_recovery()`), no `ha_endpoint` |
+| sync-replication | manual | `synchronous_standby_names = 'ANY n (other nodes)'`, written per node, so any node can become the primary without reconfiguration |
+| patroni | Patroni | `status: planned`, refused at validate time |
+
+Accounts (created once on the primary, replicated): `exporter` (`pg_monitor`), `repl` (REPLICATION), `bench` (owns the benchmark database), `rewind` (password `db_admin_password`, execute on the file functions `pg_rewind` needs). Standbys authenticate through `~postgres/.pgpass`, so no password sits in `primary_conninfo`. TLS (`ssl=on`, `scram-sha-256`) is mandatory on private networks (`hostssl`).
+
+Build (`make ha`): each node starts as its own cluster (provision). The deploy role copies the primary onto every replica with `pg_basebackup` (refused when the replica holds data other than the empty benchmark database, unless `-e postgres_rebuild_replica=true`), writes `standby.signal` and `primary_conninfo` (`application_name` = node name), and waits for streaming. Replaying the deploy changes nothing.
+
+Failover (`failover.yml`, manual strategies), with LSNs instead of GTIDs:
+
+1. Fence: the old primary is stopped cleanly (`pg_ctlcluster stop -m fast`). A clean stop makes the walsenders ship every WAL record, including the shutdown checkpoint, to the standbys. When the old primary is already down (unplanned) there is nothing to fence.
+2. Wait until each candidate has replayed everything it received (and, after a clean stop, the shutdown checkpoint). A candidate that does not (cut off, lagging) is not eligible.
+3. Choose the highest replay LSN. A requested `new_primary` that is not the highest is refused and the old primary is started again.
+4. `pg_promote()`, `ALTER SYSTEM RESET primary_conninfo`, `CHECKPOINT`.
+5. Repoint: running standbys get the new `primary_conninfo` and follow the new timeline (`recovery_target_timeline=latest`); the old primary, stopped cleanly, starts as a standby with `standby.signal` (no rewind is needed, and it refuses to start that way if it was not shut down cleanly).
+
+Recover (`recover.yml -e node=<n>`): a node that returns as a standby is repointed; one that returns as a primary (the old primary after an unplanned failover) is stopped, rewound with `pg_rewind` (needs `db_admin_password`), and started as a standby. `-e postgres_rebuild=true` replaces its data with a base backup when it cannot be rewound. Known gap: `recover.yml` starts the service first, and the old primary comes up writable until the rejoin step stops it, so keep clients away from it until then.
+
+With `sync-replication` and fewer reachable standbys than `num_sync`, commits wait. After an unplanned failover of a 2-node cluster the new primary has no standby to acknowledge, so writes block until the old primary returns.
+
+Metrics: `engine_postgres.py` emits the neutral topology metrics (`ha_lab_writable` from `pg_is_in_recovery()` and `default_transaction_read_only`; `ha_lab_replication_position` is the WAL byte offset, insert LSN on a primary and replay LSN on a standby), `replication_lag_seconds`, `replication_queue_size{queue="wal_replay"}` in bytes, `ha_lab_sync_standbys`, transactions, deadlocks and lock waits. `postgres_exporter` (`pg_up`, port 19187) runs on every node. The dialect `jmeter/scripts/dialects/postgres.groovy` classifies errors by SQLSTATE; `served_by` is the node address because `cluster_name` is set to it.
+
+Verified in containers (Debian trixie, PostgreSQL 17, Docker connection plugin, no systemd). Streaming replication: provisioning, deploy twice (the second changes nothing), topology, switchover, unplanned failover, recover with `pg_rewind` (WAL the old primary held and no standby had was removed), ledger dump, destroy with and without data. Sync replication: provisioning, deploy twice, topology (checks the synchronous standbys), switchover, a switchover refused because the requested node was cut off, unplanned failover, recover (rewind and `postgres_rebuild`), deploy refused over existing data and then `postgres_rebuild_replica`. Also run: the JMeter dialect (prepare and baseline, 0 errors), the collector module, and `postgres_exporter` (`pg_up 1`). Not run against real Ubuntu 24.04 hosts: the systemd units (exporter, collector), the apt and pin tasks on a host that has no PostgreSQL package yet, the firewall, `make plan-host` and `make validate`.
+
+## Planned strategies
 
 | Engine | Strategies | Failover |
 |---|---|---|
 | MariaDB | galera | built in (Galera) |
 | MariaDB | maxscale | MaxScale |
-| PostgreSQL | streaming-replication, sync-replication | manual |
 | PostgreSQL | patroni (etcd) | Patroni |
 
-Their descriptors exist and, for PostgreSQL, so do the JMeter dialect and driver file. The roles, hooks and collectors do not, and the PostgreSQL dialect and driver version are untested.
+Their descriptor entries exist; their roles and hooks do not.
 
 ## Default ports
 

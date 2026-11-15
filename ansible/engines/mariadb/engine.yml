@@ -12,6 +12,15 @@ process_names: [mariadbd]
 helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
 marker_dir: /etc/mysql
 config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
+paths_written:
+  - /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
+  - /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+  - /etc/ha-lab
+  - /etc/halab
+  - /opt/ha-lab
+  - /opt/node_exporter-*
+  - /opt/mysqld_exporter-*
+  - /var/lib/node_exporter/textfile
 primary_port: mariadb
 exporter_port: mariadb_exporter
 exporter:

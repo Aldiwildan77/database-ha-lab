@@ -76,7 +76,7 @@
           {%- set _ = c.append('port ' ~ port ~ ' is already used by ' ~ proc) -%}
           {%- endif -%}
           {%- endfor -%}
-          {%- if not host_lab_managed and (host_planned_pool_mb | int + 512) > (host_memavail.stdout | int) -%}
+          {%- if db_engine == 'mysql' and not host_lab_managed and (host_planned_pool_mb | int + 512) > (host_memavail.stdout | int) -%}
           {%- set _ = c.append('innodb_buffer_pool_size ' ~ host_planned_pool_mb ~ ' MB + 512 MB does not fit in '
                 ~ host_memavail.stdout ~ ' MB available; set mysql.buffer_pool_ratio or innodb_buffer_pool_size') -%}
           {%- endif -%}
@@ -86,12 +86,13 @@
           already_lab_managed: "{{ host_lab_managed }}"
           os: "{{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }}"
           memory_available_mb: "{{ host_memavail.stdout | int }}"
-          mysql_buffer_pool_mb: "{{ host_planned_pool_mb }}"
+          buffer_pool_mb: "{{ host_planned_pool_mb if db_engine == 'mysql' else 'n/a' }}"
           apt_repository: "{{ lab_engine.apt_repository[ha_provider] | default(lab_engine.apt_repository.default) }}"
           packages_to_install: >-
-            {{ (['ca-certificates', 'curl', 'gnupg', 'python3-debian', 'python3-pymysql', 'nftables', 'iperf3', 'mtr-tiny',
+            {{ (['ca-certificates', 'curl', 'gnupg', 'python3-debian', 'nftables', 'iperf3', 'mtr-tiny',
                  'iputils-ping', 'sysstat', 'jq']
                 + ([] if other_time_daemons | select('in', host_packages) | list else ['chrony'])
+                + (['python3-pymysql'] if db_engine == 'mysql' else [])
                 + (['ufw'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'ufw' else [])
                 + engine_packages)
                | reject('in', host_packages) | list }}
@@ -100,17 +101,10 @@
                if other_time_daemons | select('in', host_packages) | list
                else 'chrony (replaces systemd-timesyncd if present)' }}
           services_added: >-
-            {{ [lab_engine.service, 'node_exporter', 'mysqld_exporter', 'ha-lab-collector', 'ha-lab-network-probe.timer']
+            {{ [lab_engine.service, 'node_exporter', lab_engine.exporter.name, 'ha-lab-collector', 'ha-lab-network-probe.timer']
                + (['halab-firewall'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'nftables' else []) }}
-          system_users_added: [node_exporter, mysqld_exporter]
-          paths_written:
-            - "{{ lab_engine.config_file | default('/etc/mysql/mysql.conf.d/zz-ha-lab.cnf') }}"
-            - /etc/ha-lab
-            - /etc/halab
-            - /opt/ha-lab
-            - /opt/node_exporter-*
-            - /opt/mysqld_exporter-*
-            - /var/lib/node_exporter/textfile
+          system_users_added: "{{ ['node_exporter', lab_engine.collector.run_as] | unique }}"
+          paths_written: "{{ lab_engine.paths_written }}"
           lab_ports: "{{ lab_ports }}"
           ports_in_use_now: "{{ host_listeners }}"
           firewall: >-
@@ -120,7 +114,7 @@
                                        | selectattr('value.state', 'equalto', 'running')
                                        | map(attribute='key') | map('regex_replace', '\\.service$', '') | list)
                              | list }})
-          restarts: the database server only when its lab config changes; existing services are not restarted
+          restarts: the database only when its lab config changes; existing services are not restarted
 
     - name: Show plan
       ansible.builtin.debug:

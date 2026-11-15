@@ -1,0 +1,43 @@
+---
+postgres_repo_uri: https://apt.postgresql.org/pub/repos/apt
+postgres_repo_key_url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+postgres_supported_versions: ["16", "17", "18"]
+postgres_packages:
+  - postgresql-common
+  - "postgresql-{{ pg_version }}"
+  - "postgresql-client-{{ pg_version }}"
+  - python3-psycopg2
+  - ssl-cert
+  - acl
+
+# Set true to let the lab take over a cluster named halab that it did not create.
+postgres_adopt_existing: false
+
+# Fraction of total RAM for shared_buffers; lower it on servers shared with other services.
+postgres_shared_buffers_ratio: "{{ (lab_ha.postgres | default({})).shared_buffers_ratio | default(0.25) | float }}"
+postgres_shared_buffers_mb: "{{ [128, (ansible_facts['memtotal_mb'] * postgres_shared_buffers_ratio) | int] | max }}"
+
+postgres_base_config:
+  listen_addresses: "*"
+  cluster_name: "{{ node_fqdn }}"
+  max_connections: 500
+  shared_buffers: "{{ postgres_shared_buffers_mb }}MB"
+  effective_cache_size: "{{ [256, (ansible_facts['memtotal_mb'] * 0.5) | int] | max }}MB"
+  password_encryption: scram-sha-256
+  ssl: "on"
+  wal_level: replica
+  max_wal_senders: 20
+  max_replication_slots: 20
+  wal_keep_size: 1GB
+  hot_standby: "on"
+  # pg_rewind needs wal_log_hints or data checksums; both are on.
+  wal_log_hints: "on"
+  recovery_target_timeline: latest
+  synchronous_commit: "on"
+  log_min_duration_statement: 1000
+  log_line_prefix: "%m [%p] %q%u@%d "
+postgres_effective_config: "{{ postgres_base_config | combine(db_config, db_node_config) }}"
+
+# Private (unencrypted) networks accept TLS connections only; encrypted networks (tailscale, vpn) also allow plain ones.
+postgres_hba_type: "{{ 'hostssl' if lab_unencrypted_networks | default([]) else 'host' }}"
+postgres_hba_sources: "{{ lab_allowed_sources }}"

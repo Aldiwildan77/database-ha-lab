@@ -15,7 +15,7 @@ The full catalogue is in [`metrics/schema/metrics.yml`](../../metrics/schema/met
 ## Engine-neutral topology metrics
 
 Every engine collector emits these with the same names, so failover detection and the benchmark never depend on the database:
-`ha_lab_db_up`, `ha_lab_writable`, `ha_lab_read_only` and `ha_lab_replication_position`. The position is a count of applied transactions for MySQL (GTID set) and would be an LSN offset for PostgreSQL. Equal values across nodes mean converged. A new engine adds `metrics/collectors/engine_<engine>.py` with a `Collector(cfg)` that has `.lock` and `.collect(registry)`, and names it in its descriptor (`collector`). Engine-specific Prometheus rules live in `local/prometheus/rules/engine-<engine>.yml`.
+`ha_lab_db_up`, `ha_lab_writable`, `ha_lab_read_only` and `ha_lab_replication_position`. The position is a count of applied transactions for MySQL (GTID set) and a WAL byte offset (LSN minus `0/0`) for PostgreSQL; on PostgreSQL a primary's own reads can add WAL (hint-bit full-page images), so compare positions on an idle cluster. Equal values across nodes mean converged. A new engine adds `metrics/collectors/engine_<engine>.py` with a `Collector(cfg)` that has `.lock` and `.collect(registry)`, and names it in its descriptor (`collector`). Engine-specific Prometheus rules live in `local/prometheus/rules/engine-<engine>.yml`.
 
 ## The levels
 

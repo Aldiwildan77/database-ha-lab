@@ -1,0 +1,54 @@
+---
+# PostgreSQL: sets lab_topo (contract in ansible/tasks/topology-facts.yml). db_up=false when unreachable.
+# position is the WAL position as a byte offset (replay LSN on a standby, current write LSN on a primary).
+# read_only is true on a standby and on a node fenced with default_transaction_read_only.
+- name: Read server state
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT pg_is_in_recovery() AS in_recovery,
+             current_setting('default_transaction_read_only') = 'on' AS fenced,
+             pg_wal_lsn_diff(CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_insert_lsn() END, '0/0')::bigint AS position,
+             CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn()::text ELSE pg_current_wal_insert_lsn()::text END AS lsn,
+             pg_wal_lsn_diff(pg_last_wal_receive_lsn(), '0/0')::bigint AS received,
+             current_setting('primary_conninfo') AS conninfo,
+             (SELECT status FROM pg_stat_wal_receiver LIMIT 1) AS receiver_status,
+             CASE WHEN pg_is_in_recovery() THEN pg_is_wal_replay_paused() ELSE false END AS replay_paused,
+             COALESCE((SELECT received_tli FROM pg_stat_wal_receiver), (SELECT timeline_id FROM pg_control_checkpoint())) AS timeline,
+             (SELECT count(*) FROM pg_stat_replication WHERE state = 'streaming')::int AS streaming_standbys,
+             (SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum'))::int AS sync_standbys,
+             current_setting('synchronous_standby_names') AS sync_names,
+             current_setting('server_version') AS version
+  register: topo_raw
+  ignore_unreachable: true
+  failed_when: false
+  changed_when: false
+
+- name: Build topology facts
+  vars:
+    s: "{{ topo_raw.query_result[0] if topo_raw.query_result is defined else {} }}"
+    source_host: "{{ s.conninfo | default('') | regex_search('host=\\S+') | default('', true) | regex_replace('^host=', '') }}"
+  ansible.builtin.set_fact:
+    lab_topo:
+      node: "{{ inventory_hostname }}"
+      db_up: "{{ topo_raw.query_result is defined }}"
+      error: "{{ topo_raw.msg | default('') if topo_raw.query_result is not defined else '' }}"
+      read_only: "{{ (s.in_recovery or s.fenced) if topo_raw.query_result is defined else none }}"
+      super_read_only: "{{ (s.in_recovery or s.fenced) if topo_raw.query_result is defined else none }}"
+      position: "{{ s.position | default('') }}"
+      lsn: "{{ s.lsn | default('') }}"
+      replica: >-
+        {{ {'source_host': source_host,
+            'io_state': 'ON' if s.receiver_status | default('') == 'streaming' else (s.receiver_status | default('') or 'OFF'),
+            'sql_state': 'OFF' if s.replay_paused else 'ON',
+            'received': s.received | default('')} if (s.in_recovery | default(false) and source_host != '') else {} }}
+      group: []
+      status:
+        timeline: "{{ s.timeline | default('') }}"
+        streaming_standbys: "{{ s.streaming_standbys | default(0) }}"
+        sync_standbys: "{{ s.sync_standbys | default(0) }}"
+        synchronous_standby_names: "{{ s.sync_names | default('') }}"
+        version: "{{ s.version | default('') }}"
