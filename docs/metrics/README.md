@@ -6,9 +6,9 @@ The full catalogue is in [`metrics/schema/metrics.yml`](../../metrics/schema/met
 
 | Job | Runs on | Port | Produces |
 |---|---|---|---|
-| `node` | every node | 9100 | Host resources, plus `network_*` from the node-to-node probe (textfile, every 30 s) |
-| `mysqld` | every node | 9104 | mysqld_exporter: global status, InnoDB, replication, Group Replication, wsrep |
-| `halab` | every node | 9106 | `metrics/collectors/ha_lab_collector.py`: server-side histograms, replication apply, topology state |
+| `node` | every node | 19100 | Host resources, plus `network_*` from the node-to-node probe (textfile, every 30 s) |
+| `mysqld` | every node | 19104 | mysqld_exporter: global status, InnoDB, replication, Group Replication, wsrep |
+| `halab` | every node | 19106 | `metrics/collectors/ha_lab_collector.py`: server-side histograms, replication apply, topology state |
 | `benchmark` | this machine | 9464 | `benchmark/runner/jtl_exporter.py`: Level 0 and client-side Level 1/2, while a benchmark runs |
 | `local_probe` | this machine | 9465 | `metrics/collectors/local_probe.py`: client-to-node RTT, loss, TCP connect, Tailscale path |
 

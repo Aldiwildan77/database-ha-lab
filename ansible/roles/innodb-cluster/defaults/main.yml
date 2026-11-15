@@ -3,7 +3,7 @@ innodb_cluster_cfg: "{{ lab_ha.innodb_cluster | default({}) }}"
 innodb_cluster_name: "{{ innodb_cluster_cfg.cluster_name | default('halab') }}"
 innodb_cluster_recovery_method: "{{ innodb_cluster_cfg.recovery_method | default('clone') }}"
 innodb_cluster_router_enabled: "{{ (innodb_cluster_cfg.router | default({})).enabled | default(true) }}"
-innodb_cluster_router_base_port: "{{ (innodb_cluster_cfg.router | default({})).rw_port | default(6446) }}"
+innodb_cluster_router_base_port: "{{ router_rw_port }}"
 innodb_cluster_admin: clusteradmin
 innodb_cluster_seed: "{{ groups['role_primary'][0] }}"
 innodb_cluster_seed_uri: "{{ innodb_cluster_admin }}@{{ hostvars[innodb_cluster_seed].node_fqdn }}:{{ mysql_port }}"

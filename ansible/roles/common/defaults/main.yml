@@ -26,7 +26,7 @@ common_firewall_ssh_allow_all_interfaces: "{{ (lab_monitoring.firewall | default
 # Every node network's cidrs plus monitoring.yml allowed_sources (computed by the inventory plugin).
 common_firewall_allowed_sources: "{{ lab_allowed_sources }}"
 common_firewall_extra_ports: []
-common_firewall_iperf_port: 5201
+common_firewall_iperf_port: "{{ lab_iperf_port }}"
 common_firewall_tcp_ports: >-
   {{ (lab_mesh_tcp_ports + lab_client_tcp_ports + lab_monitoring_tcp_ports + [common_firewall_iperf_port]
       + common_firewall_extra_ports) | map('int') | unique | list }}

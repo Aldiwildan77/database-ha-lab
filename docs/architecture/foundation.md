@@ -30,6 +30,24 @@
 - Clock offset (`node_timex_offset_seconds`, chrony) is recorded but cross-node timestamp subtraction remains uncertain by at least that offset.
 - The default nftables table only adds drops for lab ports. Your other tables still apply, so lab ports must not be blocked by them. `make mesh-check` detects that.
 
+## Ports
+
+Every lab port defaults to a value that differs from the product's standard port. The lab can then run next to an existing MySQL, exporter, Orchestrator, Router or Galera on the same host without a port collision. All of them are configurable, and the inventory plugin rejects duplicates.
+
+| Purpose | Lab default | Product standard | Setting |
+|---|---|---|---|
+| MySQL | 13306 | 3306 | `ha.yml` `mysql.port` |
+| MySQL X Protocol | off | 33060 | not used by the lab |
+| node_exporter | 19100 | 9100 | `ha.yml` `monitoring.node_exporter_port` |
+| mysqld_exporter | 19104 | 9104 | `ha.yml` `monitoring.mysql_exporter_port` |
+| Lab collector | 19106 | — | `ha.yml` `monitoring.lab_collector_port` |
+| Orchestrator HTTP / raft | 13000 / 13008 | 3000 / 10008 | `ha.yml` `orchestrator.http_port`, `raft_port` |
+| MySQL Router RW / RO | 16446 / 16447 | 6446 / 6447 | `ha.yml` `innodb_cluster.router.rw_port` |
+| Galera group / IST / SST | 14567 / 14568 / 14444 | 4567 / 4568 / 4444 | `ha.yml` `percona_xtradb_cluster.gcomm_port`, `ist_port`, `sst_port` |
+| iperf3 (network matrix) | 15201 | 5201 | `monitoring.yml` `iperf_port` |
+
+Different ports do not let two *system* MySQL installations share a host. They would still share packages, `/var/lib/mysql` and the `mysql` service, and `make plan-host` refuses that case.
+
 ## Supported versions
 
 | Component | Version |

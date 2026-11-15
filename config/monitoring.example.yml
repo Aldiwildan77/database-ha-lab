@@ -15,6 +15,8 @@ firewall:
   backend: nftables
   ssh_allow_all_interfaces: true   # ufw only: false = SSH only on the lab interface
 
+iperf_port: 15201   # standard 5201; used by make network-matrix IPERF=1
+
 exporters:
   node_exporter:
     version: "1.12.1"

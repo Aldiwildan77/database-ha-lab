@@ -1,7 +1,6 @@
 ---
 orchestrator_cfg: "{{ lab_ha.orchestrator | default({}) }}"
-orchestrator_http_port: "{{ orchestrator_cfg.http_port | default(3000) }}"
-orchestrator_raft_port: "{{ orchestrator_cfg.raft_port | default(10008) }}"
+# orchestrator_http_port and orchestrator_raft_port come from the inventory plugin (lab port defaults).
 orchestrator_recovery_block_seconds: "{{ orchestrator_cfg.recovery_period_block_seconds | default(60) }}"
 orchestrator_poll_seconds: "{{ orchestrator_cfg.instance_poll_seconds | default(5) }}"
 orchestrator_percona_repo: "{{ 'pdps-84-lts' if mysql_version == '8.4' else 'pdps-80' }}"

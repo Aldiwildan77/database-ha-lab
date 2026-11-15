@@ -3,19 +3,19 @@
 ## Architecture
 
 ```text
- client ──▶ router@mysql-01:6446 ┐
-        ──▶ router@mysql-02:6446 ├─▶ PRIMARY (writable) ◀─ group (Paxos) ─▶ SECONDARY, SECONDARY
-        ──▶ router@mysql-03:6446 ┘
+ client ──▶ router@mysql-01:16446 ┐
+        ──▶ router@mysql-02:16446 ├─▶ PRIMARY (writable) ◀─ group (Paxos) ─▶ SECONDARY, SECONDARY
+        ──▶ router@mysql-03:16446 ┘
 ```
 
 - MySQL 8.4 LTS, Group Replication in single-primary mode, managed with MySQL Shell's AdminAPI.
-- The communication stack is `MYSQL`: group traffic uses the MySQL port (3306), so there is no separate XCom port.
+- The communication stack is `MYSQL`: group traffic uses the MySQL port (lab default 13306), so there is no separate XCom port.
 - 3 to 9 members. 3 is the baseline, which tolerates 1 failure.
 - A commit returns only after the group has **certified** the transaction and a majority has received it. Members apply it asynchronously after that.
 
 ## Router and endpoints
 
-- MySQL Router is installed and bootstrapped on **every node**. RW is on `rw_port` (6446) and RO on `rw_port+1` (6447).
+- MySQL Router is installed and bootstrapped on **every node**. RW is on `rw_port` (lab default 16446) and RO on `rw_port+1` (16447).
 - The lab's `ha` endpoint lists every router and uses the first one that answers. Losing one node therefore loses one router, not the endpoint. **Router is not a single point of failure.**
 - A production deployment would instead run Router next to each application host, or behind a load balancer or DNS name that spans several routers. Either choice is a client-side decision.
 - Each router follows cluster metadata. After a failover, RW connections go to the new primary within seconds.

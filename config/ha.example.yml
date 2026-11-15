@@ -4,17 +4,19 @@
 # percona-xtradb-cluster installs Percona packages instead of Oracle MySQL and forms the cluster during provisioning.
 ha_provider: async-replication
 
+# Every lab port defaults to a value that differs from the product's standard port, so the lab can
+# sit next to an existing MySQL, exporter or Galera on the same host. All are overridable below.
 mysql:
-  version: "8.4"   # "8.4" or "8.0"
-  port: 3306               # change (e.g. 3307) when 3306 is taken on the nodes
-  buffer_pool_ratio: 0.5   # share of RAM for InnoDB; use 0.25 or less on servers running other services
-  config: {}       # extra my.cnf [mysqld] options for all nodes
+  version: "8.4"            # "8.4" or "8.0"
+  port: 13306               # standard is 3306
+  buffer_pool_ratio: 0.5    # share of RAM for InnoDB; use 0.25 or less on servers running other services
+  config: {}                # extra my.cnf [mysqld] options for all nodes
 
 monitoring:
   enabled: true
-  mysql_exporter_port: 9104
-  node_exporter_port: 9100
-  lab_collector_port: 9106
+  node_exporter_port: 19100   # standard 9100
+  mysql_exporter_port: 19104  # standard 9104
+  lab_collector_port: 19106
 
 replication:
   ssl: true                      # replication channel uses TLS (MySQL auto-generated certs)
@@ -25,8 +27,8 @@ semi_sync:
   wait_point: AFTER_SYNC         # AFTER_SYNC (lossless) | AFTER_COMMIT
 
 orchestrator:
-  http_port: 3000
-  raft_port: 10008
+  http_port: 13000               # standard 3000
+  raft_port: 13008               # standard 10008
   recovery_period_block_seconds: 60
   instance_poll_seconds: 5
 
@@ -35,13 +37,15 @@ innodb_cluster:
   recovery_method: clone         # joiners are re-seeded from a donor; their local data is replaced
   router:
     enabled: true                # one MySQL Router per node; clients list every router
-    rw_port: 6446
-    ro_port: 6447
+    rw_port: 16446               # standard 6446; read-only port is rw_port + 1
 
 percona_xtradb_cluster:
   cluster_name: halab-pxc
-  encrypt_cluster_traffic: false # Tailscale (WireGuard) already encrypts node-to-node traffic
   strict_mode: ENFORCING
+  gcomm_port: 14567              # standard 4567 (group communication)
+  ist_port: 14568                # standard 4568
+  sst_port: 14444                # standard 4444
+  # encrypt_cluster_traffic: defaults to false on tailscale/vpn networks, forced true on private networks
 
 benchmark:
   enabled: true

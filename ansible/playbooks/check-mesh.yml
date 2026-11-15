@@ -4,7 +4,7 @@
 #   node -> every peer: MySQL login as the replication account over TLS (when MySQL runs)
 #   this machine -> every node: client ports (MySQL / Router) and monitoring ports
 # Ports with no service yet get a temporary listener, so routing and firewall rules are tested
-# before MySQL or the HA software exists. UDP (Galera 4567/udp) cannot be verified this way.
+# before MySQL or the HA software exists.
 - name: Prepare temporary listeners
   hosts: mysql_nodes
   gather_facts: false

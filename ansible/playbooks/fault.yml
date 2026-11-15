@@ -8,7 +8,7 @@
   gather_facts: false
   become: true
   vars:
-    fault_ports: "{{ [mysql_port, 4444, 4567, 4568, 10008, 6446, 6447] | unique }}"
+    fault_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports) | map('int') | unique | list }}"
     max_seconds: 600
   tasks:
     - name: Require confirmation
@@ -49,7 +49,6 @@
           chain input {
             type filter hook input priority filter - 20; policy accept;
             iifname "{{ node_interface }}" tcp dport { {{ fault_ports | join(', ') }} } drop
-            iifname "{{ node_interface }}" udp dport 4567 drop
           }
           chain output {
             type filter hook output priority filter - 20; policy accept;

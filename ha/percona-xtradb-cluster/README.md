@@ -3,7 +3,7 @@
 ## Architecture
 
 ```text
- node A ◀──── wsrep (gcomm, 4567) ────▶ node B
+ node A ◀──── wsrep (gcomm, 14567) ────▶ node B
     ▲                                     ▲
     └──────────────▶ node C ◀─────────────┘     every node is writable (multi-primary)
 ```
@@ -14,10 +14,10 @@
 - `pxc_strict_mode=ENFORCING`, `wsrep_sst_method=xtrabackup-v2`.
 - `pxc_encrypt_cluster_traffic` is OFF on encrypted networks (Tailscale or VPN) and is **forced ON** when any node is on a `private` network. When it is on, the bootstrap node's CA and certificates are copied to every node (`/etc/mysql/pxc-certs`) before the cluster forms.
 - Ports open on each node's lab interface:
-  - 3306 (MySQL);
-  - 4567 TCP and UDP (group communication);
-  - 4568 (IST);
-  - 4444 (SST).
+  - 13306 (MySQL);
+  - 14567 (group communication, `gcomm_port`);
+  - 14568 (IST, `ist_port`);
+  - 14444 (SST, `sst_port`).
 
 ## Deploy
 

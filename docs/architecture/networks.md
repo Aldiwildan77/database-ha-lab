@@ -69,11 +69,11 @@ Two warnings:
    | Provider | Ports |
    |---|---|
    | All | MySQL |
-   | Orchestrator | + 3000, 10008 |
-   | PXC | + 4444, 4567, 4568 |
+   | Orchestrator | + 13000, 13008 |
+   | PXC | + 14444, 14567, 14568 |
 
    If a port has no service yet, a temporary listener answers instead. This tests routing and firewall rules before the software is installed.
 2. **Node → node, where MySQL already runs:** a real login over TLS with the replication account (or the benchmark account if no replication password is set). This proves DNS, routing, firewall, account host patterns and TLS together.
-3. **This machine → every node:** the client ports (MySQL, plus Router 6446/6447 for InnoDB Cluster) and the monitoring ports (9100, 9104, 9106).
+3. **This machine → every node:** the client ports (MySQL 13306, plus Router 16446/16447 for InnoDB Cluster) and the monitoring ports (19100, 19104, 19106).
 
-UDP (Galera 4567/udp) cannot be confirmed with a TCP connect. Check that rule by hand.
+These are the lab's default ports. They deliberately differ from each product's standard port, and all are configurable in `config/ha.yml`; see [foundation.md](foundation.md#ports).

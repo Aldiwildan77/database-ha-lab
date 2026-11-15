@@ -84,7 +84,7 @@
           {%- endfor -%}
           {%- if endpoint == 'ha' and ha_provider == 'innodb-cluster' and router.enabled | default(true) -%}
           {{ {'type': 'ha', 'mode': 'first-available', 'target': 'mysql-router',
-              'endpoints': groups['mysql_nodes'] | map('extract', hp) | map('regex_replace', '$', ':' ~ (router.rw_port | default(6446))) | list} }}
+              'endpoints': groups['mysql_nodes'] | map('extract', hp) | map('regex_replace', '$', ':' ~ router_rw_port) | list} }}
           {%- elif endpoint == 'ha' -%}
           {{ {'type': 'ha', 'mode': 'writable', 'target': 'topology-aware-client',
               'endpoints': groups['mysql_nodes'] | map('extract', hp) | map('regex_replace', '$', ':' ~ mysql_port) | list} }}

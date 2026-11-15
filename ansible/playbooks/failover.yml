@@ -219,7 +219,7 @@
           {{ ['orchestrator-client', '-c', 'graceful-master-takeover-auto', '-i', node_fqdn ~ ':' ~ mysql_port]
              + (['-d', hostvars[new_primary].node_fqdn ~ ':' ~ mysql_port] if new_primary | default('') else []) }}
       environment:
-        ORCHESTRATOR_API: "http://localhost:{{ (lab_ha.orchestrator | default({})).http_port | default(3000) }}/api"
+        ORCHESTRATOR_API: "http://localhost:{{ orchestrator_http_port }}/api"
         ORCHESTRATOR_AUTH_USER: orchestrator
         ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
       no_log: true

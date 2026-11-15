@@ -10,9 +10,9 @@ A lab for deploying, monitoring, benchmarking and comparing MySQL high-availabil
  LOCAL MACHINE (Tailscale)                         REMOTE NODES (Tailscale)
  ┌──────────────────────────────┐                 ┌───────────────────────┐
  │ Ansible ── provision ────────┼── SSH ─────────▶│ MySQL 8.4             │
- │ Prometheus ── scrape ────────┼── :9100/:9104 ─▶│ node / mysqld exporter│  x N, any DC
+ │ Prometheus ── scrape ────────┼── :19100/:19104▶│ node / mysqld exporter│  x N, any DC
  │ Grafana (dashboards)         │                 │ chrony, ufw           │
- │ JMeter ──────────────────────┼── :3306 ───────▶│ lab collector, probe  │
+ │ JMeter ──────────────────────┼── :13306 ──────▶│ lab collector, probe  │
  └──────────────────────────────┘                 └───────────────────────┘
 ```
 

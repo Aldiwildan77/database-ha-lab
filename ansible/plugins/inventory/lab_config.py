@@ -41,6 +41,21 @@ HA_PROVIDERS = {
     "innodb-cluster": (3, 9),
     "percona-xtradb-cluster": (3, None),
 }
+# Lab defaults deliberately differ from each product's standard port (3306, 9100, 9104, 3000, 6446,
+# 4567 ...) so the lab never collides with an existing installation on the same host.
+DEFAULT_PORTS = {
+    "mysql": 13306,
+    "node_exporter": 19100,
+    "mysql_exporter": 19104,
+    "lab_collector": 19106,
+    "orchestrator_http": 13000,
+    "orchestrator_raft": 13008,
+    "router_rw": 16446,          # read-only port is router_rw + 1
+    "pxc_sst": 14444,
+    "pxc_gcomm": 14567,
+    "pxc_ist": 14568,
+    "iperf": 15201,
+}
 NODE_ROLES = {"primary", "replica"}
 MYSQL_VERSIONS = {"8.0", "8.4"}
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
@@ -84,6 +99,29 @@ def mysql_host_pattern(cidr: str):
     if net.version != 4:
         return None
     return str(net.network_address) if net.prefixlen == 32 else f"{net.network_address}/{net.netmask}"
+
+
+def resolve_ports(ha: dict, mon: dict) -> dict:
+    """Effective lab ports: config value or the lab default."""
+    mysql = ha.get("mysql") or {}
+    hm = ha.get("monitoring") or {}
+    orch = ha.get("orchestrator") or {}
+    router = (ha.get("innodb_cluster") or {}).get("router") or {}
+    pxc = ha.get("percona_xtradb_cluster") or {}
+    d = DEFAULT_PORTS
+    return {
+        "mysql": mysql.get("port", d["mysql"]),
+        "node_exporter": hm.get("node_exporter_port", d["node_exporter"]),
+        "mysql_exporter": hm.get("mysql_exporter_port", d["mysql_exporter"]),
+        "lab_collector": hm.get("lab_collector_port", d["lab_collector"]),
+        "orchestrator_http": orch.get("http_port", d["orchestrator_http"]),
+        "orchestrator_raft": orch.get("raft_port", d["orchestrator_raft"]),
+        "router_rw": router.get("rw_port", d["router_rw"]),
+        "pxc_sst": pxc.get("sst_port", d["pxc_sst"]),
+        "pxc_gcomm": pxc.get("gcomm_port", d["pxc_gcomm"]),
+        "pxc_ist": pxc.get("ist_port", d["pxc_ist"]),
+        "iperf": (mon or {}).get("iperf_port", d["iperf"]),
+    }
 
 
 def group_safe(value: str) -> str:
@@ -145,22 +183,20 @@ class InventoryModule(BaseInventoryPlugin):
         client_hosts = sorted({h for h in (mysql_host_pattern(c) for c in client_cidrs) if h})
 
         provider = ha["ha_provider"]
-        orch = ha.get("orchestrator") or {}
         router = (ha.get("innodb_cluster") or {}).get("router") or {}
-        mysql_port = int(mysql.get("port", 3306))
+        ports = {k: int(v) for k, v in resolve_ports(ha, mon).items()}
+        mysql_port = ports["mysql"]
         mesh_ports = {
             "async-replication": [mysql_port],
             "semi-sync": [mysql_port],
-            "orchestrator": [mysql_port, int(orch.get("http_port", 3000)), int(orch.get("raft_port", 10008))],
+            "orchestrator": [mysql_port, ports["orchestrator_http"], ports["orchestrator_raft"]],
             "innodb-cluster": [mysql_port],
-            "percona-xtradb-cluster": [mysql_port, 4444, 4567, 4568],
+            "percona-xtradb-cluster": [mysql_port, ports["pxc_sst"], ports["pxc_gcomm"], ports["pxc_ist"]],
         }[provider]
         client_ports = [mysql_port]
         if provider == "innodb-cluster" and router.get("enabled", True):
-            client_ports.append(int(router.get("rw_port", 6446)))
-            client_ports.append(int(router.get("rw_port", 6446)) + 1)
-        monitoring_ports = [int(ha_mon.get(k, d)) for k, d in
-                            (("node_exporter_port", 9100), ("mysql_exporter_port", 9104), ("lab_collector_port", 9106))]
+            client_ports += [ports["router_rw"], ports["router_rw"] + 1]
+        monitoring_ports = [ports["node_exporter"], ports["mysql_exporter"], ports["lab_collector"]]
 
         self.inventory.add_group("mysql_nodes")
         all_vars = {
@@ -174,18 +210,26 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_allowed_sources": client_cidrs,
             "lab_ha_min_nodes": HA_PROVIDERS[provider][0],
             "lab_mesh_tcp_ports": mesh_ports,
-            "lab_mesh_udp_ports": [4567] if provider == "percona-xtradb-cluster" else [],
+            "lab_mesh_udp_ports": [],
             "lab_client_tcp_ports": client_ports,
             "lab_monitoring_tcp_ports": monitoring_ports if bool(ha_mon.get("enabled", True)) else [],
             "mysql_client_hosts": client_hosts,
             "ha_provider": ha["ha_provider"],
             "mysql_version": str(mysql.get("version", "8.4")),
-            "mysql_port": int(mysql.get("port", 3306)),
+            "mysql_port": mysql_port,
+            "lab_ports": ports,
+            "orchestrator_http_port": ports["orchestrator_http"],
+            "orchestrator_raft_port": ports["orchestrator_raft"],
+            "router_rw_port": ports["router_rw"],
+            "pxc_sst_port": ports["pxc_sst"],
+            "pxc_gcomm_port": ports["pxc_gcomm"],
+            "pxc_ist_port": ports["pxc_ist"],
+            "lab_iperf_port": ports["iperf"],
             "mysql_config": mysql.get("config") or {},
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
-            "mysql_exporter_port": int(ha_mon.get("mysql_exporter_port", 9104)),
-            "node_exporter_port": int(ha_mon.get("node_exporter_port", 9100)),
-            "lab_collector_port": int(ha_mon.get("lab_collector_port", 9106)),
+            "mysql_exporter_port": ports["mysql_exporter"],
+            "node_exporter_port": ports["node_exporter"],
+            "lab_collector_port": ports["lab_collector"],
             "lab_monitoring": mon,
             "lab_ha": ha,
             "lab_benchmark": bench,
@@ -410,18 +454,14 @@ class InventoryModule(BaseInventoryPlugin):
             errors.append("ha.yml: mysql.buffer_pool_ratio must be a number between 0.05 and 0.9")
         if str(mysql.get("version", "8.4")) not in MYSQL_VERSIONS:
             errors.append(f"ha.yml: mysql.version must be one of {sorted(MYSQL_VERSIONS)}")
-        ports = {}
-        for key, default in (("port", 3306),):
-            ports[f"mysql.{key}"] = mysql.get(key, default)
-        hm = ha.get("monitoring") or {}
-        ports["monitoring.mysql_exporter_port"] = hm.get("mysql_exporter_port", 9104)
-        ports["monitoring.node_exporter_port"] = hm.get("node_exporter_port", 9100)
-        ports["monitoring.lab_collector_port"] = hm.get("lab_collector_port", 9106)
+        ports = resolve_ports(ha, mon)
         for k, v in ports.items():
-            if not isinstance(v, int) or not (1 <= v <= 65535):
-                errors.append(f"ha.yml: {k} must be an integer port")
-        if len(set(ports.values())) != len(ports):
-            errors.append(f"ha.yml: ports must be distinct: {ports}")
+            if not isinstance(v, int) or isinstance(v, bool) or not (1024 <= v <= 65534):
+                errors.append(f"port '{k}' must be an integer between 1024 and 65534 (got {v!r})")
+        used_ports = [v for v in ports.values() if isinstance(v, int)] + (
+            [ports["router_rw"] + 1] if isinstance(ports["router_rw"], int) else [])
+        if len(set(used_ports)) != len(used_ports):
+            errors.append(f"lab ports must be distinct (router read-only port is rw_port + 1): {ports}")
 
         if mon:
             mode = mon.get("scrape_address", "ip")

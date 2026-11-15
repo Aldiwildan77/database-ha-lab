@@ -66,14 +66,14 @@
       when: iperf | default(false) | bool
       block:
         - name: Start one-shot iperf3 servers on peers
-          ansible.builtin.command: iperf3 -s -1 -D -p 5201
+          ansible.builtin.command: "iperf3 -s -1 -D -p {{ lab_iperf_port }}"
           delegate_to: "{{ item }}"
           loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
           changed_when: true
 
         - name: Run iperf3 client
           ansible.builtin.command:
-            argv: [iperf3, -c, "{{ hostvars[item].node_address }}", -p, "5201", -t, "5", -J]
+            argv: [iperf3, -c, "{{ hostvars[item].node_address }}", -p, "{{ lab_iperf_port }}", -t, "5", -J]
           loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
           register: nm_iperf
           changed_when: false
