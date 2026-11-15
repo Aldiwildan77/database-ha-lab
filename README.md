@@ -134,6 +134,7 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 - **Existing services are protected.** `make plan-host` is read-only. For each node it shows the packages, services, users, paths and ports the lab would add, and `make provision` runs it first. Provisioning stops before changing anything if:
   - a lab port is already in use (it names the process);
   - MariaDB or another MySQL server is installed;
+  - the node is a hypervisor host (Proxmox VE, libvirt, XCP-ng); create VMs on it and use those as nodes;
   - the InnoDB buffer pool would not fit in available memory (set `mysql.buffer_pool_ratio`, e.g. 0.25, on shared servers).
 
   An existing ntp, ntpsec or openntpd is kept, and chrony is installed only when none of them is present. The repo.mysql.com pin applies to `mysql-*` packages only.
