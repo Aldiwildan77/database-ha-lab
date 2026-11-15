@@ -1,0 +1,5 @@
+---
+- name: Restart mysqlrouter
+  ansible.builtin.systemd_service:
+    name: mysqlrouter
+    state: restarted

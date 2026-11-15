@@ -1,5 +1,7 @@
 ---
 # async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
+# Provisioning installs the server packages; `make ha` builds the topology.
+# percona-xtradb-cluster installs Percona packages instead of Oracle MySQL and forms the cluster during provisioning.
 ha_provider: async-replication
 
 mysql:
@@ -11,6 +13,34 @@ monitoring:
   enabled: true
   mysql_exporter_port: 9104
   node_exporter_port: 9100
+  lab_collector_port: 9106
+
+replication:
+  ssl: true                      # replication channel uses TLS (MySQL auto-generated certs)
+
+semi_sync:
+  wait_for_replica_count: 1      # rpl_semi_sync_source_wait_for_replica_count
+  timeout_ms: 10000              # after this the source silently falls back to async
+  wait_point: AFTER_SYNC         # AFTER_SYNC (lossless) | AFTER_COMMIT
+
+orchestrator:
+  http_port: 3000
+  raft_port: 10008
+  recovery_period_block_seconds: 60
+  instance_poll_seconds: 5
+
+innodb_cluster:
+  cluster_name: halab
+  recovery_method: clone         # joiners are re-seeded from a donor; their local data is replaced
+  router:
+    enabled: true                # one MySQL Router per node; clients list every router
+    rw_port: 6446
+    ro_port: 6447
+
+percona_xtradb_cluster:
+  cluster_name: halab-pxc
+  encrypt_cluster_traffic: false # Tailscale (WireGuard) already encrypts node-to-node traffic
+  strict_mode: ENFORCING
 
 benchmark:
   enabled: true

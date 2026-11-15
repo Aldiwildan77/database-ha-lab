@@ -20,6 +20,17 @@ common_packages:
 common_firewall_manage: "{{ (lab_monitoring.firewall | default({})).manage | default(true) }}"
 common_firewall_ssh_allow_all_interfaces: "{{ (lab_monitoring.firewall | default({})).ssh_allow_all_interfaces | default(true) }}"
 common_firewall_allowed_sources: "{{ lab_monitoring.allowed_sources | default(['100.64.0.0/10', 'fd7a:115c:a1e0::/48']) }}"
-# HA roles append their ports here (e.g. 33061 for Group Replication).
 common_firewall_extra_ports: []
-common_firewall_tcp_ports: "{{ [mysql_port, node_exporter_port, mysql_exporter_port] + common_firewall_extra_ports }}"
+common_firewall_provider_ports:
+  orchestrator:
+    - "{{ (lab_ha.orchestrator | default({})).http_port | default(3000) }}"
+    - "{{ (lab_ha.orchestrator | default({})).raft_port | default(10008) }}"
+  innodb-cluster:
+    - "{{ ((lab_ha.innodb_cluster | default({})).router | default({})).rw_port | default(6446) }}"
+    - "{{ ((lab_ha.innodb_cluster | default({})).router | default({})).ro_port | default(6447) }}"
+  percona-xtradb-cluster: [4444, 4567, 4568]
+common_firewall_iperf_port: 5201
+common_firewall_tcp_ports: >-
+  {{ ([mysql_port, node_exporter_port, mysql_exporter_port, lab_collector_port, common_firewall_iperf_port]
+      + common_firewall_provider_ports.get(ha_provider, []) + common_firewall_extra_ports) | map('int') | unique | list }}
+common_firewall_udp_ports: "{{ [4567] if ha_provider == 'percona-xtradb-cluster' else [] }}"

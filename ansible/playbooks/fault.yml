@@ -1,0 +1,84 @@
+---
+# Controlled fault injection. Destructive for availability: requires -e confirm=yes.
+#   -e node=<name> -e fault=stop-mysql|kill-mysql|isolate|netem -e action=inject|restore
+#   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
+- name: Fault injection
+  hosts: "{{ node | default('none') }}"
+  gather_facts: false
+  become: true
+  vars:
+    fault_ports: "{{ [mysql_port, 4444, 4567, 4568, 10008, 6446, 6447] | unique }}"
+    max_seconds: 600
+  tasks:
+    - name: Require confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm | default('') == 'yes'
+          - fault in ['stop-mysql', 'kill-mysql', 'isolate', 'netem']
+          - action | default('inject') in ['inject', 'restore']
+        fail_msg: "Pass -e confirm=yes -e fault=stop-mysql|kill-mysql|isolate|netem -e action=inject|restore"
+        quiet: true
+
+    - name: Stop MySQL gracefully
+      ansible.builtin.systemd_service:
+        name: mysql
+        state: stopped
+      when: fault == 'stop-mysql' and action | default('inject') == 'inject'
+
+    # systemd may restart mysqld after SIGKILL, as it would after a real crash.
+    - name: Kill mysqld (SIGKILL)
+      ansible.builtin.command: pkill -9 -x mysqld
+      changed_when: true
+      failed_when: false
+      when: fault == 'kill-mysql' and action | default('inject') == 'inject'
+
+    - name: Start MySQL
+      ansible.builtin.systemd_service:
+        name: mysql
+        state: started
+      when: fault in ['stop-mysql', 'kill-mysql'] and action == 'restore'
+
+    - name: Isolate database traffic (SSH and exporters stay reachable)
+      ansible.builtin.shell: |
+        set -e
+        iptables -N HALAB_FAULT 2>/dev/null || iptables -F HALAB_FAULT
+        for p in {{ fault_ports | join(' ') }}; do
+          iptables -A HALAB_FAULT -i tailscale0 -p tcp --dport "$p" -j DROP
+          iptables -A HALAB_FAULT -o tailscale0 -p tcp --dport "$p" -j DROP
+          iptables -A HALAB_FAULT -o tailscale0 -p tcp --sport "$p" -j DROP
+        done
+        iptables -A HALAB_FAULT -p udp --dport 4567 -j DROP
+        iptables -C INPUT -j HALAB_FAULT 2>/dev/null || iptables -I INPUT -j HALAB_FAULT
+        iptables -C OUTPUT -j HALAB_FAULT 2>/dev/null || iptables -I OUTPUT -j HALAB_FAULT
+        systemd-run --unit halab-fault-autorestore --on-active={{ max_seconds }} iptables -F HALAB_FAULT || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'isolate' and action | default('inject') == 'inject'
+
+    - name: Remove isolation
+      ansible.builtin.shell: |
+        iptables -F HALAB_FAULT 2>/dev/null || true
+        systemctl stop halab-fault-autorestore.timer 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'isolate' and action == 'restore'
+
+    - name: Add netem impairment on tailscale0
+      ansible.builtin.shell: |
+        tc qdisc replace dev tailscale0 root netem {{ netem | default('delay 100ms 20ms loss 1%') }}
+        systemd-run --unit halab-netem-autorestore --on-active={{ max_seconds }} tc qdisc del dev tailscale0 root || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'netem' and action | default('inject') == 'inject'
+
+    - name: Remove netem impairment
+      ansible.builtin.shell: |
+        tc qdisc del dev tailscale0 root 2>/dev/null || true
+        systemctl stop halab-netem-autorestore.timer 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'netem' and action == 'restore'

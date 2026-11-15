@@ -1,0 +1,15 @@
+---
+- name: Refuse a primary that is itself replicating
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is configured as a replica of {{ replication_status.Source_Host | default('?') }}.
+      Run make destroy or failover.yml before rebuilding with it as primary.
+  when: replication_status.Is_Replica | default(false)
+
+- name: Make primary writable
+  ansible.mysql.mysql_variables:
+    login_unix_socket: "{{ replication_socket }}"
+    variable: "{{ item }}"
+    value: "OFF"
+    mode: persist
+  loop: [super_read_only, read_only]

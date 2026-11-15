@@ -4,6 +4,11 @@ exclude_paths:
   - .ansible/
   - local/
   - config/
+  - metrics/
+  - jmeter/
+  - benchmark/
 # Role directory names follow the project layout (node-exporter, mysql-exporter, ...).
 skip_list:
   - role-name
+  - run-once[task]  # the lab never uses strategy: free
+  - run-once[play]

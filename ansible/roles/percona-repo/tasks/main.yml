@@ -1,0 +1,17 @@
+---
+# Enables one Percona repository: percona_repo=pxc-84-lts | pxc-80 | pdps-84-lts | pdps-80
+- name: Install percona-release
+  ansible.builtin.apt:
+    deb: https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+    state: present
+
+- name: Enable Percona repository {{ percona_repo }}
+  ansible.builtin.command:
+    argv: [percona-release, enable-only, "{{ percona_repo }}", release]
+    creates: "/etc/apt/sources.list.d/percona-{{ percona_repo }}-release.list"
+  register: percona_repo_enabled
+
+- name: Refresh APT cache
+  ansible.builtin.apt:
+    update_cache: true
+  when: percona_repo_enabled.changed  # noqa: no-handler

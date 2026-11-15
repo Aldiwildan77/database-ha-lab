@@ -1,0 +1,75 @@
+---
+- name: Preflight
+  hosts: mysql_nodes
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: Read deployed provider marker
+      ansible.builtin.slurp:
+        src: /etc/mysql/.ha-lab-provider
+      register: deployed_provider
+      failed_when: false
+
+    - name: Refuse switching providers in place
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} runs {{ deployed_provider.content | b64decode | trim }}, config asks for
+          {{ ha_provider }}. Run make destroy first; switching topologies in place is not supported.
+      when:
+        - deployed_provider.content is defined
+        - deployed_provider.content | b64decode | trim != ha_provider
+
+    - name: Require provisioned nodes
+      ansible.builtin.stat:
+        path: /etc/mysql/.ha-lab-managed
+      register: provisioned
+      failed_when: not provisioned.stat.exists
+
+- name: Deploy HA provider
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: Open provider ports
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: firewall
+      when: lab_monitoring.firewall.manage | default(true) | bool
+
+    - name: Async or semi-sync replication
+      ansible.builtin.include_role:
+        name: replication
+      when: ha_provider in ['async-replication', 'semi-sync', 'orchestrator']
+
+    - name: Orchestrator
+      ansible.builtin.include_role:
+        name: orchestrator
+      when: ha_provider == 'orchestrator'
+
+    - name: InnoDB Cluster
+      ansible.builtin.include_role:
+        name: innodb-cluster
+      when: ha_provider == 'innodb-cluster'
+
+    - name: Percona XtraDB Cluster
+      ansible.builtin.include_role:
+        name: percona-xtradb-cluster
+        tasks_from: cluster
+      when: ha_provider == 'percona-xtradb-cluster'
+
+    - name: Record deployed provider
+      ansible.builtin.copy:
+        dest: /etc/mysql/.ha-lab-provider
+        content: "{{ ha_provider }}\n"
+        mode: "0644"
+
+- name: Verify topology
+  ansible.builtin.import_playbook: topology.yml

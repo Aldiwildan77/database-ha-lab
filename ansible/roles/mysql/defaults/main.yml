@@ -38,4 +38,11 @@ mysql_base_config:
 
 mysql_effective_config: "{{ mysql_base_config | combine(mysql_config, mysql_node_config) }}"
 
+mysql_users_session_vars:
+  sql_log_bin: 0
 mysql_exporter_user: exporter
+mysql_replication_user: repl
+mysql_benchmark_user: bench
+mysql_benchmark_database: "{{ lab_benchmark.database | default('halab') }}"
+# IPv4 Tailscale range in MySQL host-pattern form.
+mysql_tailnet_host: 100.64.0.0/255.192.0.0

@@ -1,0 +1,95 @@
+---
+- name: Require admin password
+  ansible.builtin.assert:
+    that: mysql_admin_password | length >= 16
+    fail_msg: Set mysql_admin_password (>= 16 chars) for the clusteradmin account.
+    quiet: true
+  no_log: true
+
+- name: Install MySQL Shell and Router
+  ansible.builtin.apt:
+    name: [mysql-shell, mysql-router]
+    state: present
+
+- name: Create cluster admin account
+  ansible.mysql.mysql_user:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    name: "{{ innodb_cluster_admin }}"
+    host: 100.64.0.0/255.192.0.0
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_admin_password }}"
+    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+    priv: "*.*:ALL,GRANT"
+    session_vars:
+      sql_log_bin: 0
+    state: present
+  no_log: true
+
+# configureInstance is idempotent and persists GR prerequisites with SET PERSIST.
+- name: Configure instance for Group Replication
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --js
+      - --passwords-from-stdin
+      - "{{ innodb_cluster_admin }}@{{ node_fqdn }}:{{ mysql_port }}"
+      - -e
+      - "dba.configureInstance(); print('\\nconfigured');"
+    stdin: "{{ mysql_admin_password }}"
+  register: ic_configure
+  changed_when: "'successfully configured' in ic_configure.stdout"
+  failed_when: ic_configure.rc != 0 or 'configured' not in ic_configure.stdout
+
+- name: Restart MySQL when configureInstance requires it
+  ansible.builtin.service:
+    name: mysql
+    state: restarted
+  when: "'restart is required' in ic_configure.stdout | lower or 'requires a restart' in ic_configure.stdout | lower"
+
+- name: Wait for MySQL
+  ansible.builtin.wait_for:
+    path: /var/run/mysqld/mysqld.sock
+    timeout: 120
+
+- name: Create cluster on the seed node
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --js
+      - --passwords-from-stdin
+      - "{{ innodb_cluster_seed_uri }}"
+      - -e
+      - >-
+        try { dba.getCluster('{{ innodb_cluster_name }}'); print('\nexists'); }
+        catch (e) { dba.createCluster('{{ innodb_cluster_name }}', {communicationStack: 'MYSQL'}); print('\ncreated'); }
+    stdin: "{{ mysql_admin_password }}"
+  register: ic_create
+  changed_when: "'created' in ic_create.stdout"
+  run_once: true
+  delegate_to: "{{ innodb_cluster_seed }}"
+
+- name: Add or rejoin members (one at a time; clone replaces the joiner's data)
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --js
+      - --passwords-from-stdin
+      - "{{ innodb_cluster_seed_uri }}"
+      - -e
+      - >-
+        var c = dba.getCluster('{{ innodb_cluster_name }}');
+        var addr = '{{ hostvars[item].node_fqdn }}:{{ mysql_port }}';
+        var t = c.status().defaultReplicaSet.topology[addr];
+        if (!t) { c.addInstance(addr, {recoveryMethod: '{{ innodb_cluster_recovery_method }}'}); print('\nadded'); }
+        else if (t.status != 'ONLINE') { c.rejoinInstance(addr); print('\nrejoined'); }
+        else { print('\nonline'); }
+    stdin: "{{ mysql_admin_password }}"
+  loop: "{{ groups['mysql_nodes'] | difference([innodb_cluster_seed]) }}"
+  register: ic_add
+  changed_when: "'added' in ic_add.stdout or 'rejoined' in ic_add.stdout"
+  run_once: true
+  delegate_to: "{{ innodb_cluster_seed }}"
+
+- name: Bootstrap MySQL Router
+  ansible.builtin.include_tasks: router.yml
+  when: innodb_cluster_router_enabled | bool

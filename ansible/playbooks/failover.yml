@@ -1,0 +1,286 @@
+---
+# Promote a new primary.
+#   -e failover_mode=switchover   planned: old primary alive, writes are fenced first, no data loss
+#   -e failover_mode=failover     unplanned: old primary dead/unreachable; may lose unreplicated transactions
+#   -e new_primary=<node>         optional; default is the most advanced replica
+#   -e events_file=<path>         optional; JSON list of timestamped events is written here
+# Orchestrator, InnoDB Cluster and PXC fail over automatically; for them this playbook
+# performs a planned switchover (or waits and records the automatic promotion).
+- name: Discover topology
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: Validate mode
+      ansible.builtin.assert:
+        that: failover_mode | default('') in ['switchover', 'failover']
+        fail_msg: "Pass -e failover_mode=switchover|failover"
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Read topology
+      ansible.builtin.import_tasks: ../tasks/topology-facts.yml
+
+    - name: Start event log
+      ansible.builtin.set_fact:
+        fo_events: "{{ [{'event': 'failover_started', 'mode': failover_mode, 'at': now(utc=true).isoformat()}] }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Promote (async-replication, semi-sync)
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  vars:
+    topo: "{{ ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | list }}"
+    source_fqdns: "{{ topo | selectattr('mysql_up') | map(attribute='replica') | selectattr('source_host', 'defined') | map(attribute='source_host') | list }}"
+    old_primary_fqdn: "{{ source_fqdns | first | default('') }}"
+    old_primary: >-
+      {{ groups['mysql_nodes'] | map('extract', hostvars) | selectattr('node_fqdn', 'equalto', old_primary_fqdn)
+         | map(attribute='inventory_hostname') | first | default('') }}
+    old_primary_up: "{{ old_primary != '' and hostvars[old_primary].lab_topo.mysql_up }}"
+    candidates: "{{ topo | selectattr('mysql_up') | selectattr('replica.source_host', 'defined') | map(attribute='node') | list }}"
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: Skip for providers with built-in failover
+      ansible.builtin.meta: end_play
+      when: ha_provider not in ['async-replication', 'semi-sync']
+
+    - name: Check preconditions
+      ansible.builtin.assert:
+        that:
+          - old_primary != ''
+          - candidates | length > 0
+          - failover_mode != 'switchover' or old_primary_up
+          - failover_mode != 'failover' or not old_primary_up or (force | default(false) | bool)
+          - new_primary | default('') == '' or new_primary in candidates
+        fail_msg: >-
+          Cannot {{ failover_mode }}: old_primary={{ old_primary or 'unknown' }} up={{ old_primary_up }}
+          candidates={{ candidates }} requested={{ new_primary | default('auto') }}. The requested node must be a
+          running replica. An unplanned failover while the old primary is still up risks split brain; use
+          switchover, or pass -e force=true (the old primary is fenced read-only if reachable).
+        quiet: true
+      run_once: true
+
+    - name: Fence, choose and promote
+      block:
+        - name: Fence a reachable old primary before a forced failover
+          ansible.mysql.mysql_variables:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            variable: super_read_only
+            value: "ON"
+            mode: persist
+          delegate_to: "{{ old_primary }}"
+          run_once: true
+          when: failover_mode == 'failover' and old_primary_up
+
+        - name: Fence old primary (switchover)
+          ansible.mysql.mysql_variables:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            variable: super_read_only
+            value: "ON"
+            mode: persist
+          delegate_to: "{{ old_primary }}"
+          run_once: true
+          when: failover_mode == 'switchover'
+
+        - name: Read fenced primary GTID set
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query: SELECT @@GLOBAL.gtid_executed AS g
+          delegate_to: "{{ old_primary }}"
+          run_once: true
+          register: fo_old_gtid
+          when: failover_mode == 'switchover'
+
+        - name: Wait for candidates to apply everything they received
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query: SELECT WAIT_FOR_EXECUTED_GTID_SET(%s, %s) AS timed_out
+            positional_args:
+              - "{{ fo_old_gtid.query_result[0][0].g if failover_mode == 'switchover' else lab_topo.replica.received }}"
+              - "{{ apply_timeout | default(120) }}"
+          register: fo_wait
+          when: inventory_hostname in candidates
+
+        - name: Read candidate GTID sets after apply
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query: SELECT @@GLOBAL.gtid_executed AS g
+          register: fo_gtid
+          when: inventory_hostname in candidates
+
+        - name: Compare candidates (GTID_SUBSET of every other candidate)
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query: SELECT GTID_SUBSET(%s, @@GLOBAL.gtid_executed) AS s
+            positional_args: ["{{ hostvars[item].fo_gtid.query_result[0][0].g }}"]
+          loop: "{{ candidates | difference([inventory_hostname]) }}"
+          register: fo_cmp
+          when: inventory_hostname in candidates
+
+        - name: Choose new primary
+          ansible.builtin.set_fact:
+            fo_new_primary: >-
+              {%- set ok = [] -%}
+              {%- for c in candidates -%}
+              {%- if (hostvars[c].fo_cmp.results | default([]) | map(attribute='query_result') | map('first') | map('first')
+                      | map(attribute='s') | map('int') | reject('equalto', 1) | list | length) == 0 -%}
+              {%- set _ = ok.append(c) -%}
+              {%- endif -%}
+              {%- endfor -%}
+              {{ (new_primary if new_primary | default('') in ok else '') if new_primary | default('') else (ok | first | default('')) }}
+          run_once: true
+
+        - name: Refuse when no safe candidate exists
+          ansible.builtin.assert:
+            that: fo_new_primary != ''
+            fail_msg: >-
+              No candidate contains every transaction the others have
+              {{ ('(requested ' ~ new_primary ~ ' is behind another replica)') if new_primary | default('') else '' }}.
+              GTID sets: {{ dict(candidates | zip(candidates | map('extract', hostvars, 'fo_gtid') | map(attribute='query_result') | map('first') | map('first') | map(attribute='g'))) }}
+            quiet: true
+          run_once: true
+
+        - name: Record candidate selection
+          ansible.builtin.set_fact:
+            fo_events: "{{ hostvars['localhost'].fo_events + [{'event': 'candidate_selected', 'node': fo_new_primary, 'old_primary': old_primary, 'at': now(utc=true).isoformat()}] }}"
+          run_once: true
+          delegate_to: localhost
+          delegate_facts: true
+
+        - name: Promote new primary
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query:
+              - STOP REPLICA
+              - RESET REPLICA ALL
+              - SET PERSIST super_read_only = OFF
+              - SET PERSIST read_only = OFF
+          when: inventory_hostname == fo_new_primary
+      rescue:
+        - name: Unfence the old primary after a failed switchover
+          ansible.mysql.mysql_query:
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            query:
+              - SET PERSIST super_read_only = OFF
+              - SET PERSIST read_only = OFF
+          delegate_to: "{{ old_primary }}"
+          run_once: true
+          when: failover_mode == 'switchover' and (fo_new_primary | default('')) == ''
+
+        - name: Stop after failed promotion
+          ansible.builtin.fail:
+            msg: "{{ failover_mode }} aborted: {{ ansible_failed_result.msg | default('see previous error') }}"
+
+    - name: Record promotion
+      ansible.builtin.set_fact:
+        fo_events: "{{ hostvars['localhost'].fo_events + [{'event': 'primary_promoted', 'node': fo_new_primary, 'at': now(utc=true).isoformat()}] }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Repoint reachable nodes to the new primary
+      ansible.builtin.include_role:
+        name: replication
+      vars:
+        replication_primary: "{{ fo_new_primary }}"
+      when: lab_topo.mysql_up
+
+    - name: Record repoint
+      ansible.builtin.set_fact:
+        fo_events: "{{ hostvars['localhost'].fo_events + [{'event': 'replicas_repointed', 'at': now(utc=true).isoformat()}] }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Switchover (orchestrator, innodb-cluster)
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: Skip other providers
+      ansible.builtin.meta: end_play
+      when: ha_provider not in ['orchestrator', 'innodb-cluster']
+
+    - name: Orchestrator graceful takeover
+      ansible.builtin.command:
+        argv: >-
+          {{ ['orchestrator-client', '-c', 'graceful-master-takeover-auto', '-i', node_fqdn ~ ':' ~ mysql_port]
+             + (['-d', hostvars[new_primary].node_fqdn ~ ':' ~ mysql_port] if new_primary | default('') else []) }}
+      environment:
+        ORCHESTRATOR_API: "http://localhost:{{ (lab_ha.orchestrator | default({})).http_port | default(3000) }}/api"
+        ORCHESTRATOR_AUTH_USER: orchestrator
+        ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
+      no_log: true
+      run_once: true
+      delegate_to: "{{ (ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('mysql_up') | rejectattr('read_only') | map(attribute='node') | first) }}"
+      changed_when: true
+      when: ha_provider == 'orchestrator' and failover_mode == 'switchover'
+
+    - name: InnoDB Cluster set primary
+      ansible.builtin.command:
+        argv:
+          - mysqlsh
+          - --js
+          - --passwords-from-stdin
+          - "clusteradmin@{{ node_fqdn }}:{{ mysql_port }}"
+          - -e
+          - "dba.getCluster().setPrimaryInstance('{{ hostvars[new_primary | default(groups['mysql_nodes'] | difference([inventory_hostname]) | first)].node_fqdn }}:{{ mysql_port }}')"
+        stdin: "{{ mysql_admin_password }}"
+      no_log: true
+      run_once: true
+      changed_when: true
+      when: ha_provider == 'innodb-cluster' and failover_mode == 'switchover'
+
+    - name: Wait for automatic promotion
+      ansible.builtin.pause:
+        seconds: "{{ auto_failover_wait | default(5) }}"
+      when: failover_mode == 'failover'
+
+- name: Verify and write events
+  hosts: mysql_nodes
+  gather_facts: false
+  tasks:
+    - name: Re-read topology
+      ansible.builtin.import_tasks: ../tasks/topology-facts.yml
+
+    - name: Record final state
+      ansible.builtin.set_fact:
+        fo_events: >-
+          {{ hostvars['localhost'].fo_events + [{'event': 'failover_finished', 'at': now(utc=true).isoformat(),
+             'writable': ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('mysql_up') | rejectattr('read_only') | map(attribute='node') | list}] }}
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Ensure events directory
+      ansible.builtin.file:
+        path: "{{ (events_file | default(lab_root ~ '/local/state/x')) | dirname }}"
+        state: directory
+        mode: "0755"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Write events file
+      ansible.builtin.copy:
+        dest: "{{ events_file | default(lab_root ~ '/local/state/failover-' ~ now(utc=true).strftime('%Y%m%dT%H%M%SZ') ~ '.json') }}"
+        content: "{{ hostvars['localhost'].fo_events | to_nice_json }}\n"
+        mode: "0644"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Show events
+      ansible.builtin.debug:
+        var: hostvars['localhost'].fo_events
+      run_once: true

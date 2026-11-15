@@ -1,9 +1,7 @@
 ---
-- name: Refuse providers that use a different MySQL distribution
+- name: Refuse Oracle MySQL for Percona XtraDB Cluster
   ansible.builtin.fail:
-    msg: >-
-      ha_provider={{ ha_provider }} needs Percona XtraDB Cluster packages instead of
-      Oracle MySQL. Its provisioning is not implemented yet (Phase 7).
+    msg: ha_provider=percona-xtradb-cluster uses the percona-xtradb-cluster role, not the mysql role.
   when: ha_provider == 'percona-xtradb-cluster'
 
 - name: Oracle MySQL APT packages are amd64 only
@@ -114,19 +112,5 @@
     fail_msg: "Unexpected MySQL state on {{ inventory_hostname }}: version {{ mysql_info.version.full }}"
     quiet: true
 
-# sql_log_bin=0 keeps node-local accounts out of the binlog so they never
-# become errant GTIDs once replication is configured.
-- name: Create exporter account
-  ansible.mysql.mysql_user:
-    login_unix_socket: "{{ mysql_socket }}"
-    name: "{{ mysql_exporter_user }}"
-    host: localhost
-    password: "{{ mysql_exporter_password }}"
-    priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
-    resource_limits:
-      MAX_USER_CONNECTIONS: 3
-    session_vars:
-      sql_log_bin: 0
-    state: present
-  no_log: true
-  when: monitoring_enabled | bool
+- name: Create lab accounts
+  ansible.builtin.import_tasks: users.yml

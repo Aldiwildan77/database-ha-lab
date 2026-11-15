@@ -1,0 +1,20 @@
+---
+- name: Show HA topology and health
+  hosts: mysql_nodes
+  gather_facts: false
+  tasks:
+    - name: Read topology
+      ansible.builtin.import_tasks: ../tasks/topology-facts.yml
+
+    - name: Show node state
+      ansible.builtin.debug:
+        msg: >-
+          {{ lab_topo.node }}: up={{ lab_topo.mysql_up }} read_only={{ lab_topo.read_only }}
+          source={{ lab_topo.replica.source_host | default('-') }}
+          io={{ lab_topo.replica.io_state | default('-') }} sql={{ lab_topo.replica.sql_state | default('-') }}
+          gr={{ lab_topo.group | map(attribute='state') | list if lab_topo.group else '-' }}
+          wsrep={{ lab_topo.status.wsrep_local_state_comment | default('-') }}
+          {{ lab_topo.error }}
+
+    - name: Check health
+      ansible.builtin.import_tasks: ../tasks/ha-health.yml

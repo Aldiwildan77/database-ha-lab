@@ -36,6 +36,17 @@
     comment: ha-lab
   loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports) | list }}"
 
+- name: Allow lab UDP ports from permitted Tailscale sources
+  community.general.ufw:
+    rule: allow
+    interface: tailscale0
+    direction: in
+    from_ip: "{{ item.0 }}"
+    to_port: "{{ item.1 | string }}"
+    proto: udp
+    comment: ha-lab
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_udp_ports) | list }}"
+
 - name: Enable firewall with default deny incoming
   community.general.ufw:
     state: enabled

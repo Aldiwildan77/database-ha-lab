@@ -1,0 +1,4 @@
+---
+- name: Note PXC config change
+  ansible.builtin.debug:
+    msg: PXC configuration changed; restart nodes one at a time (make recover NODE=<name> after systemctl restart mysql).

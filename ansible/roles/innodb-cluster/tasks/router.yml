@@ -1,0 +1,37 @@
+---
+- name: Check for an existing Router bootstrap
+  ansible.builtin.command: grep -q '^\[metadata_cache' /etc/mysqlrouter/mysqlrouter.conf
+  register: ic_router_bootstrapped
+  changed_when: false
+  failed_when: false
+
+# Router listens on base_port (RW) and base_port+1 (RO). Clients list every node's router.
+- name: Bootstrap Router against the cluster
+  ansible.builtin.command:
+    argv:
+      - mysqlrouter
+      - --bootstrap
+      - "{{ innodb_cluster_seed_uri }}"
+      - --user=mysqlrouter
+      - --conf-base-port={{ innodb_cluster_router_base_port }}
+      - --report-host={{ node_fqdn }}
+      - --force
+    stdin: "{{ mysql_admin_password }}"
+  when: ic_router_bootstrapped.rc != 0
+  changed_when: true
+  notify: Restart mysqlrouter
+  no_log: true
+
+- name: Start Router
+  ansible.builtin.systemd_service:
+    name: mysqlrouter
+    state: started
+    enabled: true
+
+- name: Apply pending Router restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Router RW port
+  ansible.builtin.wait_for:
+    port: "{{ innodb_cluster_router_base_port }}"
+    timeout: 60

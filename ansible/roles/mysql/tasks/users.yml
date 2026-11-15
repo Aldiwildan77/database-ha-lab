@@ -1,0 +1,47 @@
+---
+# sql_log_bin=0 keeps node-local accounts out of the binlog so they never
+# become errant GTIDs once replication is configured. Every node gets the
+# same accounts, so any node can become primary.
+- name: Create exporter account
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ mysql_socket }}"
+    name: "{{ mysql_exporter_user }}"
+    host: localhost
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_exporter_password }}"
+    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+    priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
+    resource_limits:
+      MAX_USER_CONNECTIONS: 5
+    session_vars: "{{ mysql_users_session_vars }}"
+    state: present
+  no_log: true
+  when: monitoring_enabled | bool
+
+- name: Create replication account
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ mysql_socket }}"
+    name: "{{ mysql_replication_user }}"
+    host: "{{ mysql_tailnet_host }}"
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_replication_password }}"
+    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+    priv: "*.*:REPLICATION SLAVE,REPLICATION CLIENT"
+    session_vars: "{{ mysql_users_session_vars }}"
+    state: present
+  no_log: true
+  when: mysql_replication_password | length > 0
+
+- name: Create benchmark account
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ mysql_socket }}"
+    name: "{{ mysql_benchmark_user }}"
+    host: "{{ mysql_tailnet_host }}"
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_benchmark_password }}"
+    salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+    priv: "{{ mysql_benchmark_database }}.*:ALL"
+    session_vars: "{{ mysql_users_session_vars }}"
+    state: present
+  no_log: true
+  when: mysql_benchmark_password | length > 0

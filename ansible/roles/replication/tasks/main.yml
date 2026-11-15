@@ -1,0 +1,25 @@
+---
+- name: Require replication password
+  ansible.builtin.assert:
+    that: mysql_replication_password | length >= 16
+    fail_msg: Set mysql_replication_password (>= 16 chars) in config/secrets.yml or LAB_MYSQL_REPLICATION_PASSWORD.
+    quiet: true
+  no_log: true
+
+- name: Read replica status
+  ansible.mysql.mysql_replication:
+    login_unix_socket: "{{ replication_socket }}"
+    mode: getreplica
+  register: replication_status
+
+- name: Configure semi-synchronous replication
+  ansible.builtin.include_tasks: semi-sync.yml
+  when: replication_semi_sync | bool
+
+- name: Configure primary
+  ansible.builtin.include_tasks: primary.yml
+  when: inventory_hostname == replication_primary
+
+- name: Configure replica
+  ansible.builtin.include_tasks: replica.yml
+  when: inventory_hostname != replication_primary

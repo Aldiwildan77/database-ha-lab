@@ -1,0 +1,45 @@
+---
+# Both plugins on every node so any node can be promoted without reconfiguration.
+- name: Read installed semi-sync plugins
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: >-
+      SELECT PLUGIN_NAME FROM information_schema.PLUGINS
+      WHERE PLUGIN_NAME IN ('rpl_semi_sync_source', 'rpl_semi_sync_replica')
+  register: replication_semi_sync_plugins
+
+- name: Install semi-sync plugins
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: "INSTALL PLUGIN {{ item.name }} SONAME '{{ item.so }}'"
+  changed_when: true
+  loop:
+    - { name: rpl_semi_sync_source, so: semisync_source.so }
+    - { name: rpl_semi_sync_replica, so: semisync_replica.so }
+  when: item.name not in (replication_semi_sync_plugins.query_result[0] | map(attribute='PLUGIN_NAME') | list)
+
+- name: Configure semi-sync source settings
+  ansible.mysql.mysql_variables:
+    login_unix_socket: "{{ replication_socket }}"
+    variable: "{{ item.key }}"
+    value: "{{ item.value }}"
+    mode: persist
+  loop:
+    - { key: rpl_semi_sync_source_wait_for_replica_count, value: "{{ replication_semi_sync_settings.wait_for_replica_count }}" }
+    - { key: rpl_semi_sync_source_timeout, value: "{{ replication_semi_sync_settings.timeout_ms }}" }
+    - { key: rpl_semi_sync_source_wait_point, value: "{{ replication_semi_sync_settings.wait_point }}" }
+    - { key: rpl_semi_sync_source_enabled, value: "{{ 'ON' if inventory_hostname == replication_primary else 'OFF' }}" }
+    - { key: rpl_semi_sync_replica_enabled, value: "{{ 'OFF' if inventory_hostname == replication_primary else 'ON' }}" }
+  register: replication_semi_sync_vars
+
+# The replica only negotiates semi-sync when its IO thread (re)connects.
+- name: Restart replica IO thread to apply semi-sync
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query:
+      - STOP REPLICA IO_THREAD
+      - START REPLICA IO_THREAD
+  when:
+    - inventory_hostname != replication_primary
+    - replication_status.Is_Replica | default(false)
+    - replication_semi_sync_vars.changed

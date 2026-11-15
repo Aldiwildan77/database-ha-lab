@@ -1,0 +1,47 @@
+---
+# Runs on mysql_nodes. Sets lab_topo on every host (mysql_up=false when unreachable).
+- name: Read server state
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query:
+      - >-
+        SELECT @@GLOBAL.read_only AS read_only, @@GLOBAL.super_read_only AS super_read_only,
+               @@GLOBAL.gtid_executed AS gtid_executed, @@GLOBAL.server_uuid AS server_uuid,
+               @@GLOBAL.server_id AS server_id
+      - >-
+        SELECT c.HOST AS source_host, s.SERVICE_STATE AS io_state, a.SERVICE_STATE AS sql_state,
+               s.RECEIVED_TRANSACTION_SET AS received, s.LAST_ERROR_MESSAGE AS io_error,
+               (SELECT MAX(w.LAST_ERROR_MESSAGE) FROM performance_schema.replication_applier_status_by_worker w
+                WHERE w.CHANNEL_NAME = c.CHANNEL_NAME AND w.LAST_ERROR_NUMBER <> 0) AS sql_error
+        FROM performance_schema.replication_connection_configuration c
+        JOIN performance_schema.replication_connection_status s USING (CHANNEL_NAME)
+        JOIN performance_schema.replication_applier_status a USING (CHANNEL_NAME)
+        WHERE c.CHANNEL_NAME = ''
+      - >-
+        SELECT MEMBER_HOST AS host, MEMBER_STATE AS state, MEMBER_ROLE AS role
+        FROM performance_schema.replication_group_members WHERE MEMBER_ID <> ''
+      - >-
+        SELECT VARIABLE_NAME AS name, VARIABLE_VALUE AS value FROM performance_schema.global_status
+        WHERE VARIABLE_NAME IN ('wsrep_ready', 'wsrep_cluster_status', 'wsrep_cluster_size',
+          'wsrep_local_state_comment', 'wsrep_connected', 'Rpl_semi_sync_source_status',
+          'Rpl_semi_sync_replica_status')
+  register: topo_raw
+  become: true
+  ignore_unreachable: true
+  failed_when: false
+  changed_when: false
+
+- name: Build topology facts
+  ansible.builtin.set_fact:
+    lab_topo:
+      node: "{{ inventory_hostname }}"
+      mysql_up: "{{ topo_raw.query_result is defined }}"
+      error: "{{ topo_raw.msg | default('') if topo_raw.query_result is not defined else '' }}"
+      read_only: "{{ (topo_raw.query_result[0][0].read_only | int == 1) if topo_raw.query_result is defined else none }}"
+      super_read_only: "{{ (topo_raw.query_result[0][0].super_read_only | int == 1) if topo_raw.query_result is defined else none }}"
+      gtid_executed: "{{ topo_raw.query_result[0][0].gtid_executed | regex_replace('\\s', '') if topo_raw.query_result is defined else '' }}"
+      replica: "{{ topo_raw.query_result[1][0] if (topo_raw.query_result is defined and topo_raw.query_result[1] | length) else {} }}"
+      group: "{{ topo_raw.query_result[2] if topo_raw.query_result is defined else [] }}"
+      status: >-
+        {{ dict(topo_raw.query_result[3] | map(attribute='name') | map('lower')
+                | zip(topo_raw.query_result[3] | map(attribute='value'))) if topo_raw.query_result is defined else {} }}

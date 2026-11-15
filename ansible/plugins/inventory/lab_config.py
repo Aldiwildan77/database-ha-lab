@@ -36,7 +36,7 @@ from ansible.plugins.inventory import BaseInventoryPlugin
 HA_PROVIDERS = {
     # provider: (minimum nodes, maximum nodes or None, phase status)
     "async-replication": (2, None),
-    "orchestrator": (2, None),
+    "orchestrator": (3, None),
     "semi-sync": (2, None),
     "innodb-cluster": (3, 9),
     "percona-xtradb-cluster": (3, None),
@@ -93,6 +93,7 @@ class InventoryModule(BaseInventoryPlugin):
         inv = self._load(os.path.join(config_dir, "inventory.yml"))
         ha = self._load(os.path.join(config_dir, "ha.yml"))
         mon = self._load(os.path.join(config_dir, "monitoring.yml"), required=False)
+        bench = self._load(os.path.join(config_dir, "benchmark.yml"), required=False)
 
         errors: list[str] = []
         warnings: list[str] = []
@@ -121,7 +122,10 @@ class InventoryModule(BaseInventoryPlugin):
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
             "mysql_exporter_port": int(ha_mon.get("mysql_exporter_port", 9104)),
             "node_exporter_port": int(ha_mon.get("node_exporter_port", 9100)),
+            "lab_collector_port": int(ha_mon.get("lab_collector_port", 9106)),
             "lab_monitoring": mon,
+            "lab_ha": ha,
+            "lab_benchmark": bench,
             "lab_node_count": len(nodes),
         }
         for k, v in all_vars.items():
@@ -253,7 +257,7 @@ class InventoryModule(BaseInventoryPlugin):
                     f"inventory.yml: exactly one node must have role 'primary' "
                     f"(initial primary / bootstrap node), found {len(primaries)}"
                 )
-            if provider in ("innodb-cluster", "percona-xtradb-cluster") and n % 2 == 0:
+            if provider in ("innodb-cluster", "percona-xtradb-cluster", "orchestrator") and n % 2 == 0:
                 warnings.append(f"{provider} with an even node count ({n}) does not improve quorum tolerance")
 
         mysql = ha.get("mysql") or {}
@@ -265,6 +269,7 @@ class InventoryModule(BaseInventoryPlugin):
         hm = ha.get("monitoring") or {}
         ports["monitoring.mysql_exporter_port"] = hm.get("mysql_exporter_port", 9104)
         ports["monitoring.node_exporter_port"] = hm.get("node_exporter_port", 9100)
+        ports["monitoring.lab_collector_port"] = hm.get("lab_collector_port", 9106)
         for k, v in ports.items():
             if not isinstance(v, int) or not (1 <= v <= 65535):
                 errors.append(f"ha.yml: {k} must be an integer port")

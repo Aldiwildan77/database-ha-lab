@@ -20,7 +20,22 @@
       ansible.builtin.import_tasks: ../tasks/preflight-node.yml
   roles:
     - common
-    - mysql
+  tasks:
+    - name: Install Oracle MySQL
+      ansible.builtin.include_role:
+        name: mysql
+      when: ha_provider != 'percona-xtradb-cluster'
+
+    - name: Install Percona XtraDB Cluster
+      ansible.builtin.include_role:
+        name: percona-xtradb-cluster
+      when: ha_provider == 'percona-xtradb-cluster'
+
+    - name: Form Percona XtraDB Cluster
+      ansible.builtin.include_role:
+        name: percona-xtradb-cluster
+        tasks_from: cluster
+      when: ha_provider == 'percona-xtradb-cluster'
 
 - name: Install exporters
   ansible.builtin.import_playbook: configure-exporters.yml

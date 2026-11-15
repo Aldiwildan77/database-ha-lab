@@ -1,0 +1,68 @@
+---
+# Install Percona XtraDB Cluster packages and write configuration. Cluster formation: cluster.yml.
+- name: Load MySQL role defaults
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/../mysql/defaults/main.yml"
+
+- name: Merge configuration
+  ansible.builtin.set_fact:
+    pxc_effective_config: "{{ mysql_base_config | combine(pxc_wsrep_config, mysql_config, mysql_node_config) }}"
+
+- name: Check for an existing datadir
+  ansible.builtin.stat:
+    path: /var/lib/mysql/mysql.ibd
+  register: pxc_existing_datadir
+
+- name: Check for lab marker
+  ansible.builtin.stat:
+    path: "{{ pxc_marker_file }}"
+  register: pxc_marker
+
+- name: Check for Oracle MySQL
+  ansible.builtin.command: dpkg-query -W -f='${Status}' mysql-community-server
+  register: pxc_oracle_pkg
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to replace Oracle MySQL or foreign data
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} already has
+      {{ 'Oracle MySQL installed' if 'install ok installed' in pxc_oracle_pkg.stdout else 'a MySQL datadir the lab did not create' }}.
+      Percona XtraDB Cluster replaces the server packages. Run make destroy DATA=1 first (deletes data).
+  when: >-
+    'install ok installed' in pxc_oracle_pkg.stdout
+    or (pxc_existing_datadir.stat.exists and not pxc_marker.stat.exists and not (mysql_adopt_existing | bool))
+
+- name: Enable Percona repository
+  ansible.builtin.include_role:
+    name: percona-repo
+  vars:
+    percona_repo: "{{ pxc_repo }}"
+
+- name: Install Percona XtraDB Cluster
+  ansible.builtin.apt:
+    name: percona-xtradb-cluster
+    state: present
+  register: pxc_install
+
+# The package starts a standalone node after install; it must not run until configured.
+- name: Stop freshly installed standalone server
+  ansible.builtin.service:
+    name: mysql
+    state: stopped
+  when: pxc_install.changed  # noqa: no-handler
+
+- name: Write lab configuration
+  ansible.builtin.template:
+    src: ha-lab.cnf.j2
+    dest: "{{ pxc_config_file }}"
+    mode: "0644"
+  notify: Note PXC config change
+
+- name: Mark datadir as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ pxc_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by mysql-ha-lab (percona-xtradb-cluster). Provisioned {{ ansible_date_time.iso8601 }}\n"
