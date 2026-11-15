@@ -1,0 +1,23 @@
+---
+# Names shared by the PostgreSQL engine's roles and hooks (ansible/engines/postgres).
+pg_version: "{{ db_version | default('17') }}"
+pg_cluster: halab
+pg_port: "{{ db_port | default(15432) }}"
+pg_conf_dir: "/etc/postgresql/{{ pg_version }}/{{ pg_cluster }}"
+pg_data_dir: "/var/lib/postgresql/{{ pg_version }}/{{ pg_cluster }}"
+pg_bin_dir: "/usr/lib/postgresql/{{ pg_version }}/bin"
+pg_socket_dir: /var/run/postgresql
+pg_marker_file: /etc/postgresql/.ha-lab-managed
+pg_passfile: /var/lib/postgresql/.pgpass
+pg_exporter_user: exporter
+pg_replication_user: repl
+pg_benchmark_user: bench
+pg_rewind_user: rewind
+pg_benchmark_database: "{{ lab_benchmark.database | default('halab') }}"
+
+# Connection of the lab's own tasks: the postgres OS user over the local socket (peer authentication).
+# Tasks that use it also set become_user: postgres.
+pg_conn:
+  login_unix_socket: "{{ pg_socket_dir }}"
+  login_port: "{{ pg_port }}"
+  login_user: postgres

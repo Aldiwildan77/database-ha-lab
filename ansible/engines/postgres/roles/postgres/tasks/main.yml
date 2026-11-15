@@ -1,0 +1,194 @@
+---
+- name: Check the PostgreSQL version is supported
+  ansible.builtin.assert:
+    that: pg_version in postgres_supported_versions
+    fail_msg: "postgres.version {{ pg_version }} must be one of {{ postgres_supported_versions }}"
+    quiet: true
+
+- name: Check for an existing lab cluster
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: ["{{ pg_data_dir }}/PG_VERSION", "{{ pg_conf_dir }}/postgresql.conf"]
+  register: postgres_existing
+
+- name: Check for lab ownership marker
+  ansible.builtin.stat:
+    path: "{{ pg_marker_file }}"
+  register: postgres_marker
+
+- name: Protect a cluster the lab did not create
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} already has a cluster {{ pg_version }}/{{ pg_cluster }} that this lab did
+      not create. Refusing to touch it. Re-run with -e postgres_adopt_existing=true to take it over
+      (config will change and the cluster will restart; data is not deleted).
+  when:
+    - postgres_existing.results | map(attribute='stat.exists') | select | list | length > 0
+    - not postgres_marker.stat.exists
+    - not (postgres_adopt_existing | bool)
+
+- name: Add the PGDG APT repository
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    types: deb
+    uris: "{{ postgres_repo_uri }}"
+    suites: "{{ ansible_facts['distribution_release'] }}-pgdg"
+    components: [main]
+    signed_by: "{{ postgres_repo_key_url }}"
+  register: postgres_repo
+
+- name: Take only postgresql packages from PGDG
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/postgresql
+    mode: "0644"
+    content: |
+      Package: postgresql* libpq5 pgdg-keyring
+      Pin: origin apt.postgresql.org
+      Pin-Priority: 1001
+
+      Package: *
+      Pin: origin apt.postgresql.org
+      Pin-Priority: 100
+
+- name: Check whether the server package is installed
+  ansible.builtin.command:
+    argv: [dpkg-query, --show, "postgresql-{{ pg_version }}"]
+  register: postgres_package
+  changed_when: false
+  failed_when: false
+
+- name: Create the createcluster.d directory
+  ansible.builtin.file:
+    path: /etc/postgresql-common/createcluster.d
+    state: directory
+    mode: "0755"
+  when: postgres_package.rc != 0
+
+- name: Stop the package from creating a default cluster
+  ansible.builtin.copy:
+    dest: /etc/postgresql-common/createcluster.d/halab-no-main.conf
+    mode: "0644"
+    content: "create_main_cluster = false\n"
+  when: postgres_package.rc != 0
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: "{{ postgres_packages }}"
+    state: present
+    update_cache: "{{ postgres_repo.changed }}"
+
+- name: Remove the createcluster override (the host's defaults apply again)
+  ansible.builtin.file:
+    path: /etc/postgresql-common/createcluster.d/halab-no-main.conf
+    state: absent
+  when: postgres_package.rc != 0
+
+- name: Mark the cluster as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ pg_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_facts['date_time']['iso8601'] }}\n"
+
+- name: List clusters
+  ansible.builtin.command: pg_lsclusters --no-header
+  register: postgres_clusters
+  changed_when: false
+
+- name: Create the lab cluster
+  ansible.builtin.command:
+    argv:
+      - pg_createcluster
+      - "{{ pg_version }}"
+      - "{{ pg_cluster }}"
+      - --port
+      - "{{ pg_port }}"
+      - --start-conf
+      - auto
+      - --locale
+      - C.UTF-8
+      - --
+      - --data-checksums
+      - --auth-local=peer
+      - --auth-host=scram-sha-256
+    creates: "{{ pg_data_dir }}/PG_VERSION"
+  when: (postgres_clusters.stdout_lines | select('match', '^' ~ pg_version ~ '\\s+' ~ pg_cluster ~ '\\s') | list | length) == 0
+
+- name: Read the cluster port
+  ansible.builtin.command:
+    argv: [pg_conftool, "{{ pg_version }}", "{{ pg_cluster }}", show, port]
+  register: postgres_port_now
+  changed_when: false
+
+- name: Set the cluster port
+  ansible.builtin.command:
+    argv: [pg_conftool, "{{ pg_version }}", "{{ pg_cluster }}", set, port, "{{ pg_port }}"]
+  notify: Restart postgres
+  changed_when: true
+  when: (postgres_port_now.stdout | regex_replace('^port = ', '') | trim) != pg_port | string
+
+- name: Let the postgres user read the TLS key
+  ansible.builtin.user:
+    name: postgres
+    groups: ssl-cert
+    append: true
+
+- name: Write lab configuration
+  ansible.builtin.template:
+    src: ha-lab.conf.j2
+    dest: "{{ pg_conf_dir }}/conf.d/zz-ha-lab.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart postgres
+
+- name: Write pg_hba.conf
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ pg_conf_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: Reload postgres
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Start PostgreSQL
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", start]
+  register: postgres_start
+  changed_when: postgres_start.rc == 0
+  failed_when: postgres_start.rc not in [0, 2]
+
+- name: Wait for the PostgreSQL socket
+  ansible.builtin.wait_for:
+    path: "{{ pg_socket_dir }}/.s.PGSQL.{{ pg_port }}"
+    timeout: 120
+
+- name: Check server state over the local socket
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT current_setting('server_version') AS version, current_setting('data_checksums') AS checksums,
+             current_setting('wal_log_hints') AS wal_log_hints, current_setting('port') AS port,
+             pg_is_in_recovery() AS in_recovery
+  register: postgres_state
+  changed_when: false
+
+- name: Assert effective server settings
+  ansible.builtin.assert:
+    that:
+      - postgres_state.query_result[0].version is version(pg_version, '>=')
+      - postgres_state.query_result[0].version is version(pg_version ~ '.999', '<=')
+      - postgres_state.query_result[0].checksums == 'on' or postgres_state.query_result[0].wal_log_hints == 'on'
+      - postgres_state.query_result[0].port | string == pg_port | string
+    fail_msg: "Unexpected PostgreSQL state on {{ inventory_hostname }}: {{ postgres_state.query_result[0] }}"
+    quiet: true
+
+- name: Create lab roles and database
+  ansible.builtin.import_tasks: users.yml
+  when: not postgres_state.query_result[0].in_recovery

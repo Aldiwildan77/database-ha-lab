@@ -1,0 +1,78 @@
+---
+# Replaces this node's cluster with a base backup of replication_primary. Only a node that holds nothing
+# beyond the lab's empty benchmark database is replaced unless -e postgres_rebuild_replica=true.
+- name: Count databases and tables on this node
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT count(*) AS n FROM pg_database WHERE datname NOT IN ('postgres', 'template0', 'template1', %s)
+    positional_args: ["{{ pg_benchmark_database }}"]
+  register: replication_databases
+  changed_when: false
+
+- name: Count tables in the benchmark database
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    login_db: "{{ pg_benchmark_database }}"
+    query: SELECT count(*) AS n FROM pg_stat_user_tables
+  register: replication_tables
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to replace data
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} holds data (other databases: {{ replication_databases.query_result[0].n }},
+      benchmark tables: {{ replication_table_count }}), and following {{ replication_primary }}
+      would erase it. Back it up, or re-run with -e postgres_rebuild_replica=true.
+  vars:
+    replication_table_count: "{{ replication_tables.query_result[0].n if replication_tables.query_result is defined else 0 }}"
+  when:
+    - "replication_databases.query_result[0].n | int > 0 or replication_table_count | int > 0"
+    - not (postgres_rebuild_replica | bool)
+
+- name: Stop the cluster
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", stop, -m, fast]
+  changed_when: true
+
+- name: Remove the data directory
+  ansible.builtin.file:
+    path: "{{ pg_data_dir }}"
+    state: absent
+
+- name: Recreate the data directory
+  ansible.builtin.file:
+    path: "{{ pg_data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+
+- name: Copy the primary with pg_basebackup
+  become: true
+  become_user: postgres
+  ansible.builtin.command:
+    argv:
+      - "{{ pg_bin_dir }}/pg_basebackup"
+      - --host={{ hostvars[replication_primary].node_fqdn }}
+      - --port={{ pg_port }}
+      - --username={{ pg_replication_user }}
+      - --pgdata={{ pg_data_dir }}
+      - --wal-method=stream
+      - --checkpoint=fast
+      - --no-password
+  environment:
+    PGSSLMODE: "{{ replication_ssl_mode }}"
+    PGPASSFILE: "{{ pg_passfile }}"
+  changed_when: true
+
+- name: Start the copy as a standby
+  ansible.builtin.include_tasks: offline.yml
+  vars:
+    replication_fresh_copy: true

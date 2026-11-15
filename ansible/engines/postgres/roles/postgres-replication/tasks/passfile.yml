@@ -1,0 +1,14 @@
+---
+# libpq reads this for the walreceiver, pg_basebackup and pg_rewind, so no password sits in a conninfo string.
+- name: Write the password file
+  ansible.builtin.copy:
+    dest: "{{ pg_passfile }}"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    content: |
+      *:{{ pg_port }}:replication:{{ pg_replication_user }}:{{ db_replication_password }}
+      {% if db_admin_password | length > 0 %}
+      *:{{ pg_port }}:postgres:{{ pg_rewind_user }}:{{ db_admin_password }}
+      {% endif %}
+  no_log: true

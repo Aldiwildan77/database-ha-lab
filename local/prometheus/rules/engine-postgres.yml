@@ -1,0 +1,5 @@
+groups:
+  - name: lab-postgres
+    rules:
+      - record: lab:postgres_transactions:rate1m
+        expr: sum(rate(pg_stat_database_xact_commit[1m]) + rate(pg_stat_database_xact_rollback[1m]))

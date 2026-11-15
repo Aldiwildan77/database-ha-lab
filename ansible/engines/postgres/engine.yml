@@ -1,9 +1,8 @@
 ---
-# PostgreSQL engine descriptor. status: planned means the strategies, ports and settings are defined here,
-# but the roles they name do not exist yet, so selecting this engine is refused at validate time.
+# PostgreSQL engine descriptor. A strategy with status: planned is refused at validate time until its roles exist.
 name: postgres
 display: PostgreSQL
-status: planned
+status: ready
 config_section: postgres
 versions: ["16", "17", "18"]
 default_version: "17"
@@ -30,11 +29,20 @@ ports:
   etcd_client: {default: 12379, standard: 2379, config: patroni.etcd_client_port}
   etcd_peer: {default: 12380, standard: 2380, config: patroni.etcd_peer_port}
 packages:
-  default: [postgresql, postgresql-client]
+  default: [postgresql-common, "postgresql-<version>", "postgresql-client-<version>", python3-psycopg2, ssl-cert, acl]
 apt_repository:
-  default: apt.postgresql.org (PGDG repository)
+  default: apt.postgresql.org (PGDG, pinned to postgresql-* packages only)
 conflicting_packages:
   default: []
+paths_written:
+  - /etc/postgresql/<version>/halab
+  - /var/lib/postgresql/<version>/halab
+  - /etc/postgresql/.ha-lab-managed
+  - /etc/ha-lab
+  - /etc/halab
+  - /opt/ha-lab
+  - /opt/postgres_exporter-*
+  - /var/lib/node_exporter/textfile
 
 # Replication uses LSNs, not GTIDs, so topology, promotion and RPO measurement need their own code.
 ha:
@@ -58,6 +66,7 @@ ha:
     provision: [{role: postgres}]
     deploy: [{role: postgres-replication}]
   patroni:
+    status: planned
     family: replication
     failover: patroni
     min_nodes: 3

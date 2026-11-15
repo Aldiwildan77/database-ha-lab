@@ -1,0 +1,12 @@
+---
+# PostgreSQL hook for failover.yml (manual failover). Rescue path: starts the old primary again when it was stopped
+# as the fence and no candidate was chosen.
+- name: Start the old primary after a failed failover
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", start]
+  register: fo_unfence
+  changed_when: fo_unfence.rc == 0
+  failed_when: fo_unfence.rc not in [0, 2]
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: (failover_mode == 'switchover' or old_primary_up) and (fo_new_primary | default('')) == ''

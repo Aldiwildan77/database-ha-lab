@@ -1,0 +1,46 @@
+---
+# PostgreSQL hook for destroy-ha.yml. Removes replication for destroy_provider: every node becomes a standalone,
+# writable cluster again (standbys are promoted). Data is kept.
+- name: Remove the synchronous replication settings
+  ansible.builtin.file:
+    path: "{{ pg_conf_dir }}/conf.d/zzz-ha-lab-sync.conf"
+    state: absent
+  register: destroy_sync_conf
+
+- name: Reload the configuration
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", reload]
+  changed_when: destroy_sync_conf.changed
+  failed_when: false
+
+- name: Detach and promote standbys
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  block:
+    - name: Read recovery state
+      community.postgresql.postgresql_query:
+        query: SELECT pg_is_in_recovery() AS in_recovery
+      register: destroy_state
+      changed_when: false
+      failed_when: false
+
+    - name: Forget the primary
+      args: "{{ pg_conn }}"
+      community.postgresql.postgresql_alter_system:
+        param: primary_conninfo
+        value: _RESET
+      when: (destroy_state.query_result | default([{}]))[0].in_recovery | default(false)
+
+    - name: Promote
+      community.postgresql.postgresql_query:
+        query: SELECT pg_promote(true, 60)
+        autocommit: true
+      changed_when: true
+      when: (destroy_state.query_result | default([{}]))[0].in_recovery | default(false)
+
+- name: Remove the replication password file
+  ansible.builtin.file:
+    path: "{{ pg_passfile }}"
+    state: absent

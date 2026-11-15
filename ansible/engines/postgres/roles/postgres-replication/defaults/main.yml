@@ -1,0 +1,18 @@
+---
+# Primary for the initial build; failover.yml and recover.yml pass the current primary instead.
+replication_primary: "{{ groups['role_primary'][0] }}"
+replication_sync: "{{ lab_ha_strategy.synchronous | default(false) }}"
+replication_num_sync: "{{ (lab_ha.sync_replication | default({})).num_sync | default(1) }}"
+# on = standby flushed to disk; remote_write and remote_apply are the alternatives.
+replication_commit_level: "{{ (lab_ha.sync_replication | default({})).commit_level | default('on') }}"
+replication_sync_file: "{{ pg_conf_dir }}/conf.d/zzz-ha-lab-sync.conf"
+replication_ssl_mode: require
+replication_wait_retries: 40
+replication_wait_delay: 3
+
+# -e postgres_rebuild_replica=true lets a standby replace data it holds with a copy of the primary.
+postgres_rebuild_replica: false
+
+replication_conninfo: >-
+  host={{ hostvars[replication_primary].node_fqdn }} port={{ pg_port }} user={{ pg_replication_user }}
+  application_name={{ inventory_hostname }} sslmode={{ replication_ssl_mode }} passfile={{ pg_passfile }}

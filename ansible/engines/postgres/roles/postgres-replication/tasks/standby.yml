@@ -1,0 +1,49 @@
+---
+# Makes this node stream from replication_primary. Used by deploy, failover (repoint) and recover.
+- name: Read cluster status
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", status]
+  register: replication_cluster_status
+  changed_when: false
+  failed_when: false
+
+- name: Start a stopped node as a standby
+  ansible.builtin.include_tasks: offline.yml
+  when: replication_cluster_status.rc != 0
+
+- name: Read standby state
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT pg_is_in_recovery() AS in_recovery, current_setting('primary_conninfo') AS conninfo
+  register: replication_standby_state
+  changed_when: false
+
+- name: Replace the standalone data with a copy of the primary
+  ansible.builtin.include_tasks: rebuild.yml
+  when: not replication_standby_state.query_result[0].in_recovery
+
+- name: Point the standby at the primary
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  args: "{{ pg_conn }}"
+  community.postgresql.postgresql_alter_system:
+    param: primary_conninfo
+    value: "{{ replication_conninfo }}"
+
+- name: Wait for the walreceiver to stream
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT status FROM pg_stat_wal_receiver
+  register: replication_receiver
+  until: replication_receiver.query_result | map(attribute='status') | list == ['streaming']
+  retries: "{{ replication_wait_retries }}"
+  delay: "{{ replication_wait_delay }}"
+  changed_when: false
