@@ -56,11 +56,12 @@
 
     - name: Deploy {{ ha_provider }}
       ansible.builtin.include_role:
-        name: "{{ item.role }}"
-        tasks_from: "{{ item.tasks_from | default('main') }}"
+        name: "{{ ha_step.role }}"
+        tasks_from: "{{ ha_step.tasks_from | default('main') }}"
       loop: "{{ lab_ha_strategy.deploy }}"
       loop_control:
-        label: "{{ item.role }}:{{ item.tasks_from | default('main') }}"
+        loop_var: ha_step
+        label: "{{ ha_step.role }}:{{ ha_step.tasks_from | default('main') }}"
 
     - name: Record deployed provider
       ansible.builtin.copy:
