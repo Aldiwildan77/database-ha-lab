@@ -51,8 +51,12 @@
     - name: Open provider ports
       ansible.builtin.include_role:
         name: common
-        tasks_from: firewall
-      when: lab_monitoring.firewall.manage | default(true) | bool
+        tasks_from: "firewall-{{ common_deploy_firewall_backend }}"
+      vars:
+        common_deploy_firewall_backend: "{{ (lab_monitoring.firewall | default({})).backend | default('nftables') }}"
+      when:
+        - (lab_monitoring.firewall | default({})).manage | default(true) | bool
+        - common_deploy_firewall_backend in ['nftables', 'ufw']
 
     - name: Deploy {{ ha_provider }}
       ansible.builtin.include_role:

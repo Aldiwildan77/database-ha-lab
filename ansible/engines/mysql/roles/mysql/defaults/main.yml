@@ -2,7 +2,7 @@
 mysql_repo_components:
   "8.4": mysql-8.4-lts
   "8.0": mysql-8.0
-mysql_repo_key_url: https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+mysql_repo_key_url: https://repo.mysql.com/RPM-GPG-KEY-mysql-2025
 mysql_packages:
   - mysql-server
   - mysql-client
