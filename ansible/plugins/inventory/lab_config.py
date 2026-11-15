@@ -289,8 +289,26 @@ class InventoryModule(BaseInventoryPlugin):
             data = self.loader.load_from_file(os.path.join(edir, fname), cache="none")
             if not isinstance(data, dict) or not data.get("name") or not isinstance(data.get("ha"), dict):
                 raise AnsibleParserError(f"lab_config: {fname} is not a valid engine descriptor (name and ha required)")
+            self._check_descriptor(fname, data)
             out[data["name"]] = data
         return out
+
+    @staticmethod
+    def _check_descriptor(fname, data):
+        """Fail early on descriptor typos: unknown port names, missing keys."""
+        known = set((data.get("ports") or {}))
+        for key in ("primary_port", "exporter_port"):
+            if data.get(key) not in known:
+                raise AnsibleParserError(f"lab_config: {fname}: {key} '{data.get(key)}' is not in ports")
+        for strat, spec in data["ha"].items():
+            for key in ("family", "failover", "min_nodes", "mesh_ports", "client_ports", "provision", "deploy"):
+                if key not in spec:
+                    raise AnsibleParserError(f"lab_config: {fname}: ha.{strat}.{key} is required")
+            tokens = list(spec["mesh_ports"]) + list(spec["client_ports"]) + list(
+                (spec.get("optional_client_ports") or {}).get("ports", []))
+            for token in tokens:
+                if str(token).partition("+")[0] not in known and str(token).partition("+")[0] not in CORE_PORTS:
+                    raise AnsibleParserError(f"lab_config: {fname}: ha.{strat} uses unknown port '{token}'")
 
     def _networks(self, inv, errors):
         raw = inv.get("networks")
@@ -427,6 +445,10 @@ class InventoryModule(BaseInventoryPlugin):
         provider = ha.get("ha_provider")
         if engine is None:
             errors.append(f"ha.yml: db_engine '{engine_name}' must be one of {sorted(engines)}")
+        elif engine.get("status") == "planned":
+            errors.append(f"ha.yml: db_engine '{engine_name}' is planned: its descriptor defines the strategies and "
+                          f"ports, but the roles are not implemented yet. Ready engines: "
+                          f"{sorted(n for n, e in engines.items() if e.get('status') != 'planned')}")
         elif provider not in engine["ha"]:
             errors.append(f"ha.yml: ha_provider '{provider}' is not supported by {engine_name}; "
                           f"choose one of {sorted(engine['ha'])}")

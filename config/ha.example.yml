@@ -1,5 +1,9 @@
 ---
-# Database engine. Each engine is a descriptor in ansible/engines/<name>.yml. Only mysql exists today.
+# Database engine. Each engine is a descriptor in ansible/engines/<name>.yml.
+#   mysql    ready:   async-replication | semi-sync | orchestrator | innodb-cluster | percona-xtradb-cluster
+#   mariadb  planned: async-replication | semi-sync | galera | maxscale
+#   postgres planned: streaming-replication | sync-replication | patroni
+# A planned engine is refused at validate time until its roles exist.
 db_engine: mysql
 
 # async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster

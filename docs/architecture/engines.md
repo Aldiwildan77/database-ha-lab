@@ -15,6 +15,20 @@ Status: step 1 and part of step 2 are implemented (see "Implemented" below). Rol
 
 Still hard-coded: `mysql_*` variable names, the collectors, JMeter, and the roles' location under `ansible/roles/`.
 
+## Planned engines
+
+`ansible/engines/mariadb.yml` and `postgres.yml` have `status: planned`. They define versions, ports, packages, conflicting packages and HA strategies, but the roles they name (`mariadb`, `mariadb-replication`, `mariadb-galera`, `maxscale`, `postgres`, `postgres-replication`, `etcd`, `patroni`) do not exist. Selecting one fails at validate time with a clear message. The plugin checks every descriptor at load, so a typo in a port name or a missing key fails early.
+
+| Engine | Strategies | Failover |
+|---|---|---|
+| MariaDB | async-replication, semi-sync | manual |
+| MariaDB | galera | built in (Galera) |
+| MariaDB | maxscale | MaxScale |
+| PostgreSQL | streaming-replication, sync-replication | manual |
+| PostgreSQL | patroni (etcd) | Patroni |
+
+When an engine's roles land, its status becomes `ready`. The new `failover` values (`maxscale`, `patroni`) also need handling in `failover.yml` and the runner's `auto_failover` flag.
+
 ## Planned default ports
 
 Every default differs from the product standard so the lab can sit next to an existing install. These are proposals for the engines that do not exist yet; each becomes the `ports` map of its descriptor.

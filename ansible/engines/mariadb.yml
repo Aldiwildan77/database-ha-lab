@@ -1,0 +1,71 @@
+---
+# MariaDB engine descriptor. status: planned means the strategies, ports and settings are defined here,
+# but the roles they name do not exist yet, so selecting this engine is refused at validate time.
+name: mariadb
+display: MariaDB
+status: planned
+config_section: mariadb
+versions: ["10.11", "11.4", "11.8"]
+default_version: "11.4"
+service: mariadb
+process_names: [mariadbd]
+helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
+marker_dir: /etc/mysql
+primary_port: mariadb
+exporter_port: mariadb_exporter
+ports:
+  mariadb: {default: 13306, standard: 3306, config: mariadb.port}
+  mariadb_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
+  galera_gcomm: {default: 14567, standard: 4567, config: mariadb_galera.gcomm_port}
+  galera_ist: {default: 14568, standard: 4568, config: mariadb_galera.ist_port}
+  galera_sst: {default: 14444, standard: 4444, config: mariadb_galera.sst_port}
+  maxscale_rw: {default: 14006, standard: 4006, config: maxscale.rw_port}
+  maxscale_admin: {default: 18989, standard: 8989, config: maxscale.admin_port}
+packages:
+  default: [mariadb-server, mariadb-client]
+  galera: [mariadb-server, mariadb-client, galera-4]
+apt_repository:
+  default: downloads.mariadb.com (MariaDB repository, pinned to mariadb-* packages only)
+conflicting_packages:
+  default: [mysql-server, mysql-community-server, mysql-server-8.0, percona-server-server, percona-xtradb-cluster]
+
+# Same fields as mysql.yml. MariaDB GTIDs differ from MySQL's, so replication roles are separate roles.
+ha:
+  async-replication:
+    family: replication
+    failover: manual
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mariadb]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}]
+  semi-sync:
+    family: replication
+    failover: manual
+    semi_sync: true
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mariadb]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}]
+  galera:
+    family: galera
+    failover: galera
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mariadb, galera_gcomm, galera_ist, galera_sst]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-galera}]
+  maxscale:
+    family: replication
+    failover: maxscale
+    min_nodes: 3
+    max_nodes: null
+    mesh_ports: [mariadb, maxscale_admin]
+    client_ports: [mariadb, maxscale_rw]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}, {role: maxscale}]
