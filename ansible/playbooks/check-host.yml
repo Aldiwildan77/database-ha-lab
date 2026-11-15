@@ -12,7 +12,7 @@
     conflicting_packages: "{{ lab_engine.conflicting_packages[ha_provider] | default(lab_engine.conflicting_packages.default) }}"
     engine_packages: "{{ lab_engine.packages[ha_provider] | default(lab_engine.packages.default) }}"
     other_time_daemons: [ntp, ntpsec, openntpd]
-    buffer_ratio: "{{ (lab_ha.mysql | default({})).buffer_pool_ratio | default(0.5) | float }}"
+    buffer_ratio: "{{ (lab_engine_settings | default({})).buffer_pool_ratio | default(0.5) | float }}"
   tasks:
     - name: Gather fresh facts (never from cache)
       ansible.builtin.setup:
@@ -59,7 +59,7 @@
           {%- endfor -%}
           {{ out }}
         host_planned_pool_mb: >-
-          {{ ((lab_ha.mysql | default({})).config | default({})).innodb_buffer_pool_size
+          {{ ((lab_engine_settings | default({})).config | default({})).innodb_buffer_pool_size
              | default(mysql_node_config.innodb_buffer_pool_size | default(none), true)
              | default(((ansible_memtotal_mb * buffer_ratio) | int) ~ 'M', true)
              | human_to_bytes(default_unit='B') // 1048576 }}
@@ -103,7 +103,14 @@
             {{ [lab_engine.service, 'node_exporter', 'mysqld_exporter', 'ha-lab-collector', 'ha-lab-network-probe.timer']
                + (['halab-firewall'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'nftables' else []) }}
           system_users_added: [node_exporter, mysqld_exporter]
-          paths_written: [/etc/mysql/mysql.conf.d/zz-ha-lab.cnf, /etc/ha-lab, /etc/halab, /opt/ha-lab, /opt/node_exporter-*, /opt/mysqld_exporter-*, /var/lib/node_exporter/textfile]
+          paths_written:
+            - "{{ lab_engine.config_file | default('/etc/mysql/mysql.conf.d/zz-ha-lab.cnf') }}"
+            - /etc/ha-lab
+            - /etc/halab
+            - /opt/ha-lab
+            - /opt/node_exporter-*
+            - /opt/mysqld_exporter-*
+            - /var/lib/node_exporter/textfile
           lab_ports: "{{ lab_ports }}"
           ports_in_use_now: "{{ host_listeners }}"
           firewall: >-
@@ -113,7 +120,7 @@
                                        | selectattr('value.state', 'equalto', 'running')
                                        | map(attribute='key') | map('regex_replace', '\\.service$', '') | list)
                              | list }})
-          restarts: mysqld only when its lab config changes; existing services are not restarted
+          restarts: the database server only when its lab config changes; existing services are not restarted
 
     - name: Show plan
       ansible.builtin.debug:

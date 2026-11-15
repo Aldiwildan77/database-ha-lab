@@ -166,7 +166,8 @@ class InventoryModule(BaseInventoryPlugin):
 
         env = inv.get("environment") or {}
         ssh = inv.get("ssh") or {}
-        mysql = ha.get("mysql") or {}
+        section = engine.get("config_section", "mysql")
+        mysql = ha.get(section) or {}
         ha_mon = ha.get("monitoring") or {}
 
         used = {n["_network"] for n in nodes}
@@ -233,7 +234,8 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_iperf_port": ports["iperf"],
             "mysql_config": mysql.get("config") or {},
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
-            "mysql_exporter_port": ports.get("mysql_exporter"),
+            "mysql_exporter_port": ports[engine["exporter_port"]],
+            "lab_engine_settings": mysql,
             "db_port": mysql_port,
             "db_exporter_port": ports[engine["exporter_port"]],
             "db_exporter_role": engine["exporter"]["role"],
@@ -284,7 +286,7 @@ class InventoryModule(BaseInventoryPlugin):
                 "node_datacenter": node["datacenter"],
                 "node_server_id": int(node.get("server_id", idx)),
                 "node_tailscale_ip": node.get("tailscale_ip", ""),
-                "mysql_node_config": node.get("mysql") or {},
+                "mysql_node_config": node.get(section) or {},
             }
             if node_ssh.get("private_key"):
                 hostvars["ansible_ssh_private_key_file"] = os.path.expanduser(node_ssh["private_key"])
@@ -466,8 +468,9 @@ class InventoryModule(BaseInventoryPlugin):
                 if tip in ips:
                     errors.append(f"{where}: duplicate tailscale_ip '{tip}'")
                 ips.add(tip)
-            if node.get("mysql") is not None and not isinstance(node.get("mysql"), dict):
-                errors.append(f"{where}: mysql overrides must be a mapping of my.cnf options")
+            node_section = (engines.get(engine_name) or {}).get("config_section", "mysql")
+            if node.get(node_section) is not None and not isinstance(node.get(node_section), dict):
+                errors.append(f"{where}: {node_section} overrides must be a mapping of server config options")
             if node.get("ssh") is not None and not isinstance(node.get("ssh"), dict):
                 errors.append(f"{where}: ssh overrides must be a mapping")
 
@@ -482,6 +485,10 @@ class InventoryModule(BaseInventoryPlugin):
         elif provider not in engine["ha"]:
             errors.append(f"ha.yml: ha_provider '{provider}' is not supported by {engine_name}; "
                           f"choose one of {sorted(engine['ha'])}")
+        elif engine["ha"][provider].get("status") == "planned":
+            errors.append(f"ha.yml: ha_provider '{provider}' is planned for {engine_name}: its roles are not "
+                          f"implemented yet. Ready strategies: "
+                          f"{sorted(k for k, v in engine['ha'].items() if v.get('status') != 'planned')}")
         else:
             strategy = engine["ha"][provider]
             lo, hi = strategy["min_nodes"], strategy.get("max_nodes")
@@ -515,13 +522,14 @@ class InventoryModule(BaseInventoryPlugin):
             errors.append(f"ha.yml: percona_xtradb_cluster.encrypt_cluster_traffic cannot be false on unencrypted "
                           f"networks {plain}")
 
-        mysql = ha.get("mysql") or {}
+        section = (engine or {}).get("config_section", "mysql")
+        mysql = ha.get(section) or {}
         ratio = mysql.get("buffer_pool_ratio", 0.5)
         if not isinstance(ratio, (int, float)) or not (0.05 <= float(ratio) <= 0.9):
-            errors.append("ha.yml: mysql.buffer_pool_ratio must be a number between 0.05 and 0.9")
+            errors.append(f"ha.yml: {section}.buffer_pool_ratio must be a number between 0.05 and 0.9")
         versions = (engine or {}).get("versions") or []
         if versions and str(mysql.get("version", engine["default_version"])) not in versions:
-            errors.append(f"ha.yml: mysql.version must be one of {versions}")
+            errors.append(f"ha.yml: {section}.version must be one of {versions}")
         ports = resolve_ports(ha, mon, engine or {})
         for k, v in ports.items():
             if not isinstance(v, int) or isinstance(v, bool) or not (1024 <= v <= 65534):

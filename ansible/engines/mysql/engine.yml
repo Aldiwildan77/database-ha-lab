@@ -13,6 +13,7 @@ service: mysql
 process_names: [mysqld]
 helper_processes: [node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
 marker_dir: /etc/mysql           # .ha-lab-managed and .ha-lab-provider live here
+config_file: /etc/mysql/mysql.conf.d/zz-ha-lab.cnf   # lab settings file written by the provisioning role
 
 # Engine ports. default differs from the product standard so the lab can sit next to an existing install.
 #   config: dotted path in ha.yml that overrides the default
