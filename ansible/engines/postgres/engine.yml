@@ -17,7 +17,12 @@ exporter:
   role: postgres-exporter
   name: postgres_exporter
   up_metric: pg_up
-collector: engine_postgres
+collector:
+  module: engine_postgres
+  run_as: postgres_exporter
+  after: postgresql.service
+  connect: {user: exporter, host: /var/run/postgresql}
+ansible_collections: [community.postgresql]
 ports:
   postgres: {default: 15432, standard: 5432, config: postgres.port}
   postgres_exporter: {default: 19187, standard: 9187, config: monitoring.postgres_exporter_port}

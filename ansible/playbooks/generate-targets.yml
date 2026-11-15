@@ -15,7 +15,7 @@
         mode: "0644"
         content: |
           {% set out = [] %}
-          {% for n in groups['mysql_nodes'] %}
+          {% for n in groups['db_nodes'] %}
           {% set a = lab_node_addresses[n] %}
           {% set hp = ('[' ~ a ~ ']') if ':' in a else a %}
           {% set _ = out.append({

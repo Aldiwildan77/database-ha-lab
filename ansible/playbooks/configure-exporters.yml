@@ -1,6 +1,6 @@
 ---
 - name: Install exporters on MySQL nodes
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: true
   become: true
   pre_tasks:
@@ -35,7 +35,7 @@
         timeout: 10
       vars:
         addr: "{{ ('[' ~ lab_node_addresses[item.0] ~ ']') if ':' in lab_node_addresses[item.0] else lab_node_addresses[item.0] }}"
-      loop: "{{ groups['mysql_nodes'] | product([node_exporter_port, db_exporter_port, lab_collector_port]) | list }}"
+      loop: "{{ groups['db_nodes'] | product([node_exporter_port, db_exporter_port, lab_collector_port]) | list }}"
       loop_control:
         label: "{{ item.0 }}:{{ item.1 }}"
       register: exporter_scrape

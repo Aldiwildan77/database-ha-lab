@@ -87,7 +87,7 @@
     ORCHESTRATOR_AUTH_USER: "{{ orchestrator_user }}"
     ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
   register: orchestrator_topology
-  until: orchestrator_topology.stdout_lines | length == groups['mysql_nodes'] | length
+  until: orchestrator_topology.stdout_lines | length == groups['db_nodes'] | length
   retries: 20
   delay: 3
   run_once: true

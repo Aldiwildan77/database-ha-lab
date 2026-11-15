@@ -1,0 +1,11 @@
+---
+# MySQL hook for failover.yml (manual failover). Makes fo_new_primary writable and detaches it from replication.
+- name: Promote new primary
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query:
+      - STOP REPLICA
+      - RESET REPLICA ALL
+      - SET PERSIST super_read_only = OFF
+      - SET PERSIST read_only = OFF
+  when: inventory_hostname == fo_new_primary

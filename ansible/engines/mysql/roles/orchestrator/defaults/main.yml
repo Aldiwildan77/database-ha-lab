@@ -7,5 +7,5 @@ orchestrator_percona_repo: "{{ 'pdps-84-lts' if mysql_version == '8.4' else 'pdp
 orchestrator_user: orchestrator
 orchestrator_failover_log: /var/log/orchestrator-failover.log
 orchestrator_api: >-
-  {{ groups['mysql_nodes'] | map('extract', hostvars, 'node_fqdn')
+  {{ groups['db_nodes'] | map('extract', hostvars, 'node_fqdn')
      | map('regex_replace', '^(.*)$', 'http://\1:' ~ orchestrator_http_port ~ '/api') | join(' ') }}

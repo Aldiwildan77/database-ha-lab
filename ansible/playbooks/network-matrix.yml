@@ -3,14 +3,14 @@
 #   -e out=<file.json>   default local/state/network-matrix-<ts>.json
 #   -e iperf=true        add 5 s iperf3 throughput per ordered pair (sequential)
 - name: Measure node-to-node network
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   tasks:
     - name: Ping peers
       ansible.builtin.command:
         argv: [ping, -n, -q, -c, "{{ ping_count | default(20) }}", -i, "0.2", "{{ hostvars[item].node_address }}"]
-      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
       register: nm_ping
       changed_when: false
       failed_when: false
@@ -18,7 +18,7 @@
     - name: Tailscale ping peers (both ends on tailscale networks)
       ansible.builtin.command:
         argv: [tailscale, ping, --c, "3", --timeout, 3s, "{{ hostvars[item].node_address }}"]
-      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
       register: nm_ts
       changed_when: false
       failed_when: false
@@ -29,7 +29,7 @@
         set -o pipefail; ip route get "$(getent ahostsv4 {{ hostvars[item].node_address }} | awk 'NR==1 {print $1}')" | head -1
       args:
         executable: /bin/bash
-      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
       register: nm_route
       changed_when: false
       failed_when: false
@@ -57,7 +57,7 @@
           {{ out }}
 
 - name: Measure throughput (iperf3)
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   serial: 1
@@ -68,13 +68,13 @@
         - name: Start one-shot iperf3 servers on peers
           ansible.builtin.command: "iperf3 -s -1 -D -p {{ lab_iperf_port }}"
           delegate_to: "{{ item }}"
-          loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+          loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
           changed_when: true
 
         - name: Run iperf3 client
           ansible.builtin.command:
             argv: [iperf3, -c, "{{ hostvars[item].node_address }}", -p, "{{ lab_iperf_port }}", -t, "5", -J]
-          loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+          loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
           register: nm_iperf
           changed_when: false
           failed_when: false
@@ -101,7 +101,7 @@
         mode: "0644"
         content: >-
           {{ {'measured_at': now(utc=true).isoformat(), 'source': 'node-to-node',
-              'pairs': groups['mysql_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten} | to_nice_json }}
+              'pairs': groups['db_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten} | to_nice_json }}
       register: nm_file
 
     - name: Show matrix
@@ -109,7 +109,7 @@
         msg: >-
           {{ p.src }} -> {{ p.dst }}: rtt avg {{ p.rtt_avg_ms }} ms (min {{ p.rtt_min_ms }}, max {{ p.rtt_max_ms }}),
           loss {{ p.loss_pct }}%, path {{ p.path }}{{ (', ' ~ ((p.throughput_bps / 1e6) | round(1)) ~ ' Mbit/s') if p.throughput_bps | default(none) else '' }}
-      loop: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten }}"
+      loop: "{{ groups['db_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten }}"
       loop_control:
         loop_var: p
         label: "{{ p.src }}->{{ p.dst }}"

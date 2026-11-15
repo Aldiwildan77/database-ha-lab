@@ -42,7 +42,7 @@
     name: mysql
     state: started
   delegate_to: "{{ item }}"
-  loop: "{{ groups['mysql_nodes'] | difference([] if pxc_cluster_running else [pxc_bootstrap_node]) }}"
+  loop: "{{ groups['db_nodes'] | difference([] if pxc_cluster_running else [pxc_bootstrap_node]) }}"
   run_once: true
 
 - name: Switch bootstrap node to the normal service
@@ -68,7 +68,7 @@
   until: >-
     pxc_sync.query_result is defined and
     (pxc_sync.query_result[0] | items2dict(key_name='Variable_name', value_name='Value')).wsrep_local_state_comment == 'Synced' and
-    (pxc_sync.query_result[0] | items2dict(key_name='Variable_name', value_name='Value')).wsrep_cluster_size | int == groups['mysql_nodes'] | length
+    (pxc_sync.query_result[0] | items2dict(key_name='Variable_name', value_name='Value')).wsrep_cluster_size | int == groups['db_nodes'] | length
   retries: 60
   delay: 5
 

@@ -35,8 +35,6 @@ PROM_QUERIES = {
                               '/ sum by (node) (rate(node_disk_reads_completed_total{{device!~"loop.*|ram.*|sr.*|dm-.*"}}[{d}]))', "s"),
     "tcp_retransmits_per_s": ("rate(node_netstat_Tcp_RetransSegs[{d}])", "1/s"),
     "replication_lag_max": ("max_over_time(replication_lag_seconds[{d}])", "s"),
-    "seconds_behind_source_max": ("max_over_time(mysql_slave_status_seconds_behind_source[{d}]) "
-                                  "or max_over_time(mysql_slave_status_seconds_behind_master[{d}])", "s"),
     "server_commit_p50": ('histogram_quantile(0.5, sum by (node, le) (increase(commit_duration_seconds_bucket{{side="server"}}[{d}])))', "s"),
     "server_commit_p99": ('histogram_quantile(0.99, sum by (node, le) (increase(commit_duration_seconds_bucket{{side="server"}}[{d}])))', "s"),
     "server_statement_p99": ('histogram_quantile(0.99, sum by (node, le) (increase(database_statement_duration_seconds_bucket{{side="server"}}[{d}])))', "s"),
@@ -61,10 +59,25 @@ def prom_query(base, query, at):
     return out
 
 
-def prometheus_summary(base, start, end):
+# Runs from before engine descriptors carried report queries (MySQL only).
+LEGACY_ENGINE_QUERIES = {
+    "seconds_behind_source_max": {"query": "max_over_time(mysql_slave_status_seconds_behind_source[{d}]) "
+                                           "or max_over_time(mysql_slave_status_seconds_behind_master[{d}])", "unit": "s"},
+}
+
+
+def report_queries(ctx):
+    """Engine-neutral queries plus the engine's own (engine descriptor: report_queries)."""
+    engine = ctx.get("engine_report_queries")
+    if engine is None:
+        engine = LEGACY_ENGINE_QUERIES if ctx.get("db_engine", "mysql") == "mysql" else {}
+    return {**PROM_QUERIES, **{k: (v["query"], v.get("unit", "")) for k, v in engine.items()}}
+
+
+def prometheus_summary(base, start, end, queries):
     d = max(60, int(end - start))
     res = {"window": {"start": start, "end": end, "range_s": d}, "metrics": {}}
-    for name, (q, unit) in PROM_QUERIES.items():
+    for name, (q, unit) in queries.items():
         try:
             res["metrics"][name] = {"unit": unit, "series": prom_query(base, q.format(d=f"{d}s"), end)}
         except Exception as e:  # Prometheus down or query error: keep the report going
@@ -127,7 +140,7 @@ def build(run_dir, prometheus):
     else:
         cons = json.load(open(cons_path)) if os.path.exists(cons_path) else {}
 
-    prom = prometheus_summary(prometheus, meta["started_at_epoch"], meta["finished_at_epoch"])
+    prom = prometheus_summary(prometheus, meta["started_at_epoch"], meta["finished_at_epoch"], report_queries(ctx))
     json.dump(prom, open(os.path.join(run_dir, "prometheus-summary.json"), "w"), indent=2)
 
     results = {
@@ -189,10 +202,10 @@ def render(meta, ctx, s, fo, cons, prom, net, events):
         L += ["> Direct-to-node run: measures one node, not client-facing HA behaviour. "
               "Do not compare directly with `ha` endpoint runs.", ""]
 
-    L += ["## Topology", "", "| Node | Datacenter | Network | Configured role | Writable at start | MySQL | vCPU | RAM | OS | Clock offset | Synced |",
+    L += ["## Topology", "", "| Node | Datacenter | Network | Configured role | Writable at start | Database | vCPU | RAM | OS | Clock offset | Synced |",
           "|---|---|---|---|---|---|---|---|---|---|---|"]
     for n in ctx["nodes"]:
-        L.append(f"| {n['name']} | {n['datacenter']} | {n.get('network', '-')} ({n.get('network_type', '-')}) | {n['configured_role']} | {n['writable']} | {n['mysql_version']} | "
+        L.append(f"| {n['name']} | {n['datacenter']} | {n.get('network', '-')} ({n.get('network_type', '-')}) | {n['configured_role']} | {n['writable']} | {ctx.get('db_engine', 'mysql')} {n.get('db_version', n.get('mysql_version', '-'))} | "
                  f"{n['vcpus']} | {int(n['memory_mb']) // 1024} GiB | {n['os']} | {fmt(n['clock_offset_seconds'], 'ms', 3)} | {n['clock_synced']} |")
     L.append("")
 
@@ -234,8 +247,8 @@ def render(meta, ctx, s, fo, cons, prom, net, events):
     L += ["## Server and host metrics (Prometheus)", "",
           f"Window: {dt.datetime.fromtimestamp(prom['window']['start'], dt.timezone.utc).isoformat()} + {prom['window']['range_s']} s", "",
           "| Metric | Per node |", "|---|---|"]
-    for name, (_, unit) in PROM_QUERIES.items():
-        L.append(f"| {name} | {series_table(prom, name, unit)} |")
+    for name, m in prom["metrics"].items():
+        L.append(f"| {name} | {series_table(prom, name, m['unit'])} |")
     L.append("")
 
     if fo:

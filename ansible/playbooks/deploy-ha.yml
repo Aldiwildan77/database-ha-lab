@@ -1,6 +1,6 @@
 ---
 - name: Preflight
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: true
   become: true
   any_errors_fatal: true
@@ -10,8 +10,8 @@
   tasks:
     - name: Require enough nodes for the provider
       ansible.builtin.assert:
-        that: groups['mysql_nodes'] | length >= lab_ha_min_nodes | int
-        fail_msg: "{{ ha_provider }} needs at least {{ lab_ha_min_nodes }} nodes; inventory has {{ groups['mysql_nodes'] | length }}."
+        that: groups['db_nodes'] | length >= lab_ha_min_nodes | int
+        fail_msg: "{{ ha_provider }} needs at least {{ lab_ha_min_nodes }} nodes; inventory has {{ groups['db_nodes'] | length }}."
         quiet: true
       run_once: true
 
@@ -40,7 +40,7 @@
   ansible.builtin.import_playbook: check-mesh.yml
 
 - name: Deploy HA provider
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   any_errors_fatal: true

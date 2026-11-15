@@ -1,0 +1,80 @@
+---
+# MySQL hook for failover.yml (manual failover). Fences the old primary, waits for candidates to apply,
+# and sets fo_new_primary to a candidate whose GTID set contains every other candidate's. Fails when none is safe.
+- name: Fence a reachable old primary before a forced failover
+  ansible.mysql.mysql_variables:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    variable: super_read_only
+    value: "ON"
+    mode: persist
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'failover' and old_primary_up
+
+- name: Fence old primary (switchover)
+  ansible.mysql.mysql_variables:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    variable: super_read_only
+    value: "ON"
+    mode: persist
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'switchover'
+
+- name: Read fenced primary GTID set
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.gtid_executed AS g
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  register: fo_old_gtid
+  when: failover_mode == 'switchover'
+
+- name: Wait for candidates to apply everything they received
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: SELECT WAIT_FOR_EXECUTED_GTID_SET(%s, %s) AS timed_out
+    positional_args:
+      - "{{ fo_old_gtid.query_result[0][0].g if failover_mode == 'switchover' else lab_topo.replica.received }}"
+      - "{{ apply_timeout | default(120) }}"
+  register: fo_wait
+  when: inventory_hostname in candidates
+
+- name: Read candidate GTID sets after apply
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.gtid_executed AS g
+  register: fo_gtid
+  when: inventory_hostname in candidates
+
+- name: Compare candidates (GTID_SUBSET of every other candidate)
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: SELECT GTID_SUBSET(%s, @@GLOBAL.gtid_executed) AS s
+    positional_args: ["{{ hostvars[item].fo_gtid.query_result[0][0].g }}"]
+  loop: "{{ candidates | difference([inventory_hostname]) }}"
+  register: fo_cmp
+  when: inventory_hostname in candidates
+
+- name: Choose new primary
+  ansible.builtin.set_fact:
+    fo_new_primary: >-
+      {%- set ok = [] -%}
+      {%- for c in candidates -%}
+      {%- if (hostvars[c].fo_cmp.results | default([]) | map(attribute='query_result') | map('first') | map('first')
+              | map(attribute='s') | map('int') | reject('equalto', 1) | list | length) == 0 -%}
+      {%- set _ = ok.append(c) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ (new_primary if new_primary | default('') in ok else '') if new_primary | default('') else (ok | first | default('')) }}
+  run_once: true
+
+- name: Refuse when no safe candidate exists
+  ansible.builtin.assert:
+    that: fo_new_primary != ''
+    fail_msg: >-
+      No candidate contains every transaction the others have
+      {{ ('(requested ' ~ new_primary ~ ' is behind another replica)') if new_primary | default('') else '' }}.
+      GTID sets: {{ dict(candidates | zip(candidates | map('extract', hostvars, 'fo_gtid') | map(attribute='query_result') | map('first') | map('first') | map(attribute='g'))) }}
+    quiet: true
+  run_once: true

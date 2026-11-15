@@ -13,7 +13,7 @@
   ansible.builtin.import_playbook: check-host.yml
 
 - name: Provision database nodes
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   pre_tasks:
@@ -35,19 +35,16 @@
 - name: Install exporters
   ansible.builtin.import_playbook: configure-exporters.yml
 
-- name: Full-mesh connectivity with firewall and MySQL in place
+- name: Full-mesh connectivity with firewall and database in place
   ansible.builtin.import_playbook: check-mesh.yml
 
 - name: Provisioning summary
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   tasks:
-    - name: Read MySQL status
-      ansible.mysql.mysql_info:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        filter: [version, settings]
-      register: summary_mysql
+    - name: Read server summary ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/node-summary.yml"
 
     - name: Read clock offset
       ansible.builtin.command: chronyc -c tracking
@@ -62,7 +59,6 @@
           fqdn: "{{ node_fqdn }}"
           datacenter: "{{ node_datacenter }}"
           role: "{{ node_role }}"
-          mysql: "{{ summary_mysql.version.full }}"
-          server_id: "{{ summary_mysql.settings.server_id }}"
-          gtid_mode: "{{ summary_mysql.settings.gtid_mode }}"
+          db_engine: "{{ db_engine }}"
+          db: "{{ lab_db_summary }}"
           clock_offset_seconds: "{{ (summary_chrony.stdout.split(','))[4] | default('n/a') }}"

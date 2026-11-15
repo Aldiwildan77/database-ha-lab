@@ -1,5 +1,5 @@
 ---
-# Database engine. Each engine is a descriptor in ansible/engines/<name>.yml.
+# Database engine. Each engine is a descriptor in ansible/engines/<name>/engine.yml.
 #   mysql    ready:   async-replication | semi-sync | orchestrator | innodb-cluster | percona-xtradb-cluster
 #   mariadb  planned: async-replication | semi-sync | galera | maxscale
 #   postgres planned: streaming-replication | sync-replication | patroni

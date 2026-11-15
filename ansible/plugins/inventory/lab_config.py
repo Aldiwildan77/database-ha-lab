@@ -15,7 +15,7 @@ name: lab_config
 short_description: Build inventory from mysql-ha-lab config/*.yml
 description:
   - Reads config/inventory.yml, config/ha.yml and config/monitoring.yml,
-    validates them and exposes nodes as hosts in the C(mysql_nodes) group.
+    validates them and exposes nodes as hosts in the C(db_nodes) group (alias C(mysql_nodes)).
 options:
   plugin:
     description: Name of the plugin.
@@ -34,7 +34,7 @@ from ansible.errors import AnsibleParserError
 from ansible.plugins.inventory import BaseInventoryPlugin
 
 DEFAULT_ENGINE = "mysql"
-# Core ports. Engine ports (database, engine exporter, HA components) come from ansible/engines/<engine>.yml.
+# Core ports. Engine ports (database, engine exporter, HA components) come from ansible/engines/<engine>/engine.yml.
 # Lab defaults deliberately differ from each product's standard port so the lab never collides with an
 # existing installation on the same host.
 CORE_PORTS = {
@@ -187,9 +187,18 @@ class InventoryModule(BaseInventoryPlugin):
             section = ha.get(provider.replace("-", "_")) or {}
             if (section.get(optional["feature"]) or {}).get("enabled", True):
                 client_ports += [port_value(t, ports) for t in optional["ports"]]
+        ha_endpoint = {}
+        spec = strategy.get("ha_endpoint")
+        if spec:
+            section = ha.get(provider.replace("-", "_")) or {}
+            if not spec.get("feature") or (section.get(spec["feature"]) or {}).get("enabled", True):
+                ha_endpoint = {"port": port_value(spec["port"], ports), "target": spec["target"], "mode": spec["mode"]}
         monitoring_ports = [ports["node_exporter"], ports[engine["exporter_port"]], ports["lab_collector"]]
 
+        self.inventory.add_group("db_nodes")
+        # Older name kept as an alias so existing ad-hoc commands (-l mysql_nodes) still work.
         self.inventory.add_group("mysql_nodes")
+        self.inventory.add_child("mysql_nodes", "db_nodes")
         all_vars = {
             "lab_root": lab_root,
             "lab_config_dir": config_dir,
@@ -200,8 +209,11 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_unencrypted_networks": sorted(n for n in used if not networks[n]["encrypted"]),
             "lab_allowed_sources": client_cidrs,
             "db_engine": engine_name,
+            "lab_engine_dir": engine["_dir"],
+            "lab_engine_tasks": os.path.join(engine["_dir"], "tasks"),
             "lab_engine": engine,
             "lab_ha_strategy": strategy,
+            "lab_ha_endpoint": ha_endpoint,
             "lab_ha_min_nodes": strategy["min_nodes"],
             "lab_mesh_tcp_ports": mesh_ports,
             "lab_mesh_udp_ports": [],
@@ -227,7 +239,7 @@ class InventoryModule(BaseInventoryPlugin):
             "db_exporter_role": engine["exporter"]["role"],
             "db_exporter_name": engine["exporter"]["name"],
             "db_exporter_up_metric": engine["exporter"]["up_metric"],
-            "db_collector_module": engine["collector"],
+            "db_collector_module": engine["collector"]["module"],
             "node_exporter_port": ports["node_exporter"],
             "lab_collector_port": ports["lab_collector"],
             "lab_monitoring": mon,
@@ -236,7 +248,7 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_node_count": len(nodes),
         }
         for k, v in all_vars.items():
-            self.inventory.set_variable("mysql_nodes", k, v)
+            self.inventory.set_variable("db_nodes", k, v)
         # Also expose to implicit localhost through the "all" group.
         for k, v in all_vars.items():
             self.inventory.set_variable("all", k, v)
@@ -244,14 +256,14 @@ class InventoryModule(BaseInventoryPlugin):
         for idx, node in enumerate(nodes, start=1):
             name = node["name"]
             node_ssh = {**ssh, **(node.get("ssh") or {})}
-            self.inventory.add_host(name, group="mysql_nodes")
+            self.inventory.add_host(name, group="db_nodes")
             for grp in (
                 f"dc_{group_safe(node['datacenter'])}",
                 f"role_{node['role']}",
                 f"net_{group_safe(node['_network'])}",
             ):
                 self.inventory.add_group(grp)
-                self.inventory.add_child("mysql_nodes", grp)
+                self.inventory.add_child("db_nodes", grp)
                 self.inventory.add_host(name, group=grp)
 
             net = networks[node["_network"]]
@@ -283,18 +295,22 @@ class InventoryModule(BaseInventoryPlugin):
 
     # ------------------------------------------------------------------ #
     def _engines(self, lab_root):
-        """Engine descriptors from ansible/engines/*.yml, keyed by name."""
+        """Engine descriptors from ansible/engines/<engine>/engine.yml, keyed by name."""
         edir = os.path.join(lab_root, "ansible", "engines")
         out = {}
         if not os.path.isdir(edir):
             raise AnsibleParserError(f"lab_config: engine descriptors missing: {edir}")
-        for fname in sorted(os.listdir(edir)):
-            if not fname.endswith(".yml"):
+        for sub in sorted(os.listdir(edir)):
+            fname = os.path.join(sub, "engine.yml")
+            if not os.path.isfile(os.path.join(edir, fname)):
                 continue
             data = self.loader.load_from_file(os.path.join(edir, fname), cache="none")
             if not isinstance(data, dict) or not data.get("name") or not isinstance(data.get("ha"), dict):
                 raise AnsibleParserError(f"lab_config: {fname} is not a valid engine descriptor (name and ha required)")
             self._check_descriptor(fname, data)
+            if data["name"] != sub:
+                raise AnsibleParserError(f"lab_config: {fname}: name '{data['name']}' must match its folder '{sub}'")
+            data["_dir"] = os.path.join(edir, sub)
             out[data["name"]] = data
         return out
 
@@ -305,6 +321,9 @@ class InventoryModule(BaseInventoryPlugin):
         for key in ("exporter", "collector"):
             if not data.get(key):
                 raise AnsibleParserError(f"lab_config: {fname}: {key} is required")
+        for key in ("module", "run_as", "connect"):
+            if not (data["collector"] or {}).get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: collector.{key} is required")
         for key in ("role", "name", "up_metric"):
             if not (data["exporter"] or {}).get(key):
                 raise AnsibleParserError(f"lab_config: {fname}: exporter.{key} is required")

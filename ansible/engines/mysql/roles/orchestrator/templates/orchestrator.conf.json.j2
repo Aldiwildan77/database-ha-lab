@@ -15,7 +15,7 @@
   "RaftBind": node_fqdn,
   "RaftAdvertise": node_fqdn,
   "DefaultRaftPort": orchestrator_raft_port | int,
-  "RaftNodes": groups['mysql_nodes'] | map('extract', hostvars, 'node_fqdn') | list,
+  "RaftNodes": groups['db_nodes'] | map('extract', hostvars, 'node_fqdn') | list,
   "InstancePollSeconds": orchestrator_poll_seconds | int,
   "DiscoverByShowSlaveHosts": false,
   "HostnameResolveMethod": "none",

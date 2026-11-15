@@ -85,7 +85,7 @@
         else if (t.status != 'ONLINE') { c.rejoinInstance(addr); print('\nrejoined'); }
         else { print('\nonline'); }
     stdin: "{{ mysql_admin_password }}"
-  loop: "{{ groups['mysql_nodes'] | difference([innodb_cluster_seed]) }}"
+  loop: "{{ groups['db_nodes'] | difference([innodb_cluster_seed]) }}"
   register: ic_add
   changed_when: "'added' in ic_add.stdout or 'rejoined' in ic_add.stdout"
   run_once: true

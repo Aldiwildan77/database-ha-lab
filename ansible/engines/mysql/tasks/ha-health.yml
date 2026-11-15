@@ -1,0 +1,55 @@
+---
+# MySQL health checks per strategy family. Expects lab_topo_all, lab_writable and lab_down (ansible/tasks/ha-health.yml).
+- name: Check replication topology
+  ansible.builtin.assert:
+    that:
+      - lab_down | length == 0
+      - lab_writable | length == 1
+      - lab_replicas_ok | length == (ansible_play_hosts_all | length) - 1
+    fail_msg: >-
+      Unhealthy {{ ha_provider }} topology. down={{ lab_down }} writable={{ lab_writable }}
+      replicas_ok={{ lab_replicas_ok }} details={{ lab_topo_all | map(attribute='replica') | list }}
+    quiet: true
+  vars:
+    lab_primary_fqdn: "{{ hostvars[lab_writable[0]].node_fqdn if lab_writable | length == 1 else '' }}"
+    lab_replicas_ok: >-
+      {{ lab_topo_all | selectattr('db_up') | selectattr('read_only')
+         | selectattr('replica.source_host', 'defined')
+         | selectattr('replica.source_host', 'equalto', lab_primary_fqdn)
+         | selectattr('replica.io_state', 'equalto', 'ON')
+         | selectattr('replica.sql_state', 'equalto', 'ON') | map(attribute='node') | list }}
+  run_once: true
+  when: lab_ha_strategy.family == 'replication'
+
+- name: Check semi-sync is active on the primary
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'semi-sync active' if hostvars[lab_writable[0]].lab_topo.status.rpl_semi_sync_source_status | default('OFF') == 'ON'
+         else 'WARNING: semi-sync is OFF on the primary (no semi-sync replica connected, or the timeout fell back to async)' }}
+  run_once: true
+  when: lab_ha_strategy.semi_sync | default(false) and lab_writable | length == 1
+
+- name: Check Group Replication membership
+  ansible.builtin.assert:
+    that:
+      - lab_down | length == 0
+      - lab_gr | selectattr('state', 'equalto', 'ONLINE') | list | length == ansible_play_hosts_all | length
+      - lab_gr | selectattr('role', 'equalto', 'PRIMARY') | list | length == 1
+    fail_msg: "Unhealthy InnoDB Cluster. down={{ lab_down }} members={{ lab_gr }}"
+    quiet: true
+  vars:
+    lab_gr: "{{ (lab_topo_all | selectattr('db_up') | map(attribute='group') | list | first) | default([]) }}"
+  run_once: true
+  when: lab_ha_strategy.family == 'group'
+
+- name: Check Galera cluster state
+  ansible.builtin.assert:
+    that:
+      - lab_down | length == 0
+      - lab_topo_all | map(attribute='status') | selectattr('wsrep_cluster_status', 'equalto', 'Primary') | list | length == ansible_play_hosts_all | length
+      - lab_topo_all | map(attribute='status') | selectattr('wsrep_local_state_comment', 'equalto', 'Synced') | list | length == ansible_play_hosts_all | length
+      - lab_topo_all | map(attribute='status') | map(attribute='wsrep_cluster_size') | map('int') | unique | list == [ansible_play_hosts_all | length]
+    fail_msg: "Unhealthy Percona XtraDB Cluster. down={{ lab_down }} status={{ lab_topo_all | map(attribute='status') | list }}"
+    quiet: true
+  run_once: true
+  when: lab_ha_strategy.family == 'galera'

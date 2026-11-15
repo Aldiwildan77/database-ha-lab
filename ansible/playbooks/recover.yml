@@ -1,18 +1,18 @@
 ---
 # Bring a failed node back into the topology: -e node=<name>
-- name: Start MySQL on the recovering node
-  tags: [start-mysql]
+- name: Start the database on the recovering node
+  tags: [start-db, start-mysql]
   hosts: "{{ node | default('none') }}"
   gather_facts: false
   become: true
   tasks:
-    - name: Start MySQL
+    - name: Start the database service
       ansible.builtin.service:
-        name: mysql
+        name: "{{ lab_engine.service }}"
         state: started
 
 - name: Rejoin
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   pre_tasks:
@@ -25,37 +25,13 @@
     - name: Find current primary
       ansible.builtin.set_fact:
         rc_primary: >-
-          {{ ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('mysql_up')
+          {{ ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('db_up')
              | rejectattr('read_only') | map(attribute='node') | difference([node]) | first | default('') }}
       run_once: true
 
-    - name: Rejoin as replica (async, semi-sync, orchestrator)
-      ansible.builtin.include_role:
-        name: replication
-      vars:
-        replication_primary: "{{ rc_primary }}"
+    - name: Rejoin ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/recover-rejoin.yml"
       when:
-        - lab_ha_strategy.family == 'replication'
-        - inventory_hostname == node
-        - rc_primary != ''
-
-    - name: Rejoin InnoDB Cluster
-      ansible.builtin.command:
-        argv:
-          - mysqlsh
-          - --js
-          - --passwords-from-stdin
-          - "clusteradmin@{{ hostvars[rc_primary].node_fqdn }}:{{ mysql_port }}"
-          - -e
-          - >-
-            var c = dba.getCluster(); var st = c.status().defaultReplicaSet.topology['{{ node_fqdn }}:{{ mysql_port }}'];
-            if (!st || st.status != 'ONLINE') { c.rejoinInstance('{{ node_fqdn }}:{{ mysql_port }}'); print('rejoined'); }
-        stdin: "{{ mysql_admin_password }}"
-      register: rc_gr
-      changed_when: "'rejoined' in rc_gr.stdout"
-      no_log: true
-      when:
-        - lab_ha_strategy.family == 'group'
         - inventory_hostname == node
         - rc_primary != ''
 

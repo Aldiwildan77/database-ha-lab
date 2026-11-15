@@ -1,4 +1,4 @@
-// MariaDB dialect. UNTESTED: the mariadb engine is planned (see ansible/engines/mariadb.yml).
+// MariaDB dialect. UNTESTED: the mariadb engine is planned (see ansible/engines/mariadb/engine.yml).
 class LabDialect {
     String url(String hostPort, String db, Properties p) {
         String connectMs = p.getProperty('connect_timeout_ms', '3000')

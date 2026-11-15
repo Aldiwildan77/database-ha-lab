@@ -23,7 +23,17 @@ exporter:
   role: mysql-exporter           # installs the exporter on every node
   name: mysqld_exporter
   up_metric: mysql_up            # 1 when the exporter can reach the database
-collector: engine_mysql          # metrics/collectors/<collector>.py, loaded by ha_lab_collector.py
+collector:
+  module: engine_mysql           # metrics/collectors/<module>.py, loaded by ha_lab_collector.py
+  run_as: mysqld_exporter        # system user that runs the collector and owns its config
+  after: mysql.service
+  connect: {user: exporter, socket: /var/run/mysqld/mysqld.sock}
+ansible_collections: [ansible.mysql]   # needed on this machine by the engine's roles and tasks
+# Engine-specific PromQL used by the report, {d} is the run duration. Optional; neutral metrics are used first.
+report_queries:
+  seconds_behind_source_max:
+    query: "max_over_time(mysql_slave_status_seconds_behind_source[{d}]) or max_over_time(mysql_slave_status_seconds_behind_master[{d}])"
+    unit: s
 ports:
   mysql: {default: 13306, standard: 3306, config: mysql.port}
   mysql_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
@@ -49,6 +59,7 @@ conflicting_packages:
 #   provision: roles run by make provision on every node (include_role entries)
 #   deploy:    roles run by make ha, in order
 #   even_nodes_warning: an even node count does not improve quorum tolerance
+#   ha_endpoint: proxy the benchmark's `ha` endpoint uses (else: every node, client picks the writable one)
 ha:
   async-replication:
     family: replication
@@ -90,6 +101,7 @@ ha:
     optional_client_ports:
       feature: router
       ports: [router_rw, router_rw+1]
+    ha_endpoint: {feature: router, port: router_rw, target: mysql-router, mode: first-available}
     provision: [{role: mysql}]
     deploy: [{role: innodb-cluster}]
   percona-xtradb-cluster:

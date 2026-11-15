@@ -41,12 +41,14 @@
                 major = int(m.group(2))
             out["java"]["major"] = major
         cols = {}
-        for c in ("ansible.mysql", "community.general", "ansible.posix"):
+        for c in ["community.general", "ansible.posix"] + (sys.argv[2].split() if len(sys.argv) > 2 else []):
             rc, txt = run("ansible-galaxy", "collection", "list", c, "--format", "json")
             cols[c] = rc == 0 and c in txt
         out["collections"] = cols
         print(json.dumps(out))
       - "{{ playbook_dir | dirname | dirname }}"
+      # Engine-specific collections follow as extra arguments (engine descriptor: ansible_collections).
+      - "{{ (lab_engine | default({})).ansible_collections | default(['ansible.mysql']) | join(' ') }}"
   register: tools_probe
   changed_when: false
 

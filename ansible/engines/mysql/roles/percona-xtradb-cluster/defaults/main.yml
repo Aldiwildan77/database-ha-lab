@@ -15,7 +15,7 @@ pxc_wsrep_config:
   wsrep_provider: /usr/lib/galera4/libgalera_smm.so
   wsrep_cluster_name: "{{ pxc_cluster_name }}"
   wsrep_cluster_address: >-
-    gcomm://{{ groups['mysql_nodes'] | map('extract', hostvars, 'node_address')
+    gcomm://{{ groups['db_nodes'] | map('extract', hostvars, 'node_address')
                | map('regex_replace', '$', ':' ~ pxc_gcomm_port) | join(',') }}
   wsrep_node_name: "{{ inventory_hostname }}"
   wsrep_node_address: "{{ pxc_node_address }}:{{ pxc_gcomm_port }}"

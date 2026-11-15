@@ -1,0 +1,31 @@
+---
+# MySQL hook for recover.yml. Rejoins `node` to the topology led by rc_primary.
+- name: Rejoin as replica (async, semi-sync, orchestrator)
+  ansible.builtin.include_role:
+    name: replication
+  vars:
+    replication_primary: "{{ rc_primary }}"
+  when:
+    - lab_ha_strategy.family == 'replication'
+    - inventory_hostname == node
+    - rc_primary != ''
+
+- name: Rejoin InnoDB Cluster
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --js
+      - --passwords-from-stdin
+      - "clusteradmin@{{ hostvars[rc_primary].node_fqdn }}:{{ mysql_port }}"
+      - -e
+      - >-
+        var c = dba.getCluster(); var st = c.status().defaultReplicaSet.topology['{{ node_fqdn }}:{{ mysql_port }}'];
+        if (!st || st.status != 'ONLINE') { c.rejoinInstance('{{ node_fqdn }}:{{ mysql_port }}'); print('rejoined'); }
+    stdin: "{{ mysql_admin_password }}"
+  register: rc_gr
+  changed_when: "'rejoined' in rc_gr.stdout"
+  no_log: true
+  when:
+    - lab_ha_strategy.family == 'group'
+    - inventory_hostname == node
+    - rc_primary != ''

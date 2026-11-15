@@ -8,7 +8,7 @@ make monitoring         # Prometheus, Grafana, local client probe
 ```
 
 Also check these settings:
-- `mysql_benchmark_password` is set. `make provision` creates the `bench` account from it.
+- `db_benchmark_password` is set. `make provision` creates the `bench` account from it.
 - `config/benchmark.yml` holds the endpoint, dataset and load defaults.
 
 ## Run a scenario

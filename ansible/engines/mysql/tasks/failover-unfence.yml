@@ -1,0 +1,11 @@
+---
+# MySQL hook for failover.yml (manual failover). Rescue path: makes the old primary writable again when no candidate was chosen.
+- name: Unfence the old primary after a failed switchover
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query:
+      - SET PERSIST super_read_only = OFF
+      - SET PERSIST read_only = OFF
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'switchover' and (fo_new_primary | default('')) == ''

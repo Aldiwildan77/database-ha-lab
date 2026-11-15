@@ -1,4 +1,4 @@
-// PostgreSQL dialect. UNTESTED: the postgres engine is planned (see ansible/engines/postgres.yml).
+// PostgreSQL dialect. UNTESTED: the postgres engine is planned (see ansible/engines/postgres/engine.yml).
 // Errors are classified by SQLSTATE, not by vendor code.
 class LabDialect {
     String url(String hostPort, String db, Properties p) {

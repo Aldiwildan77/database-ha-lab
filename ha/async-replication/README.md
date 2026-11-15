@@ -22,7 +22,7 @@ The primary acknowledges a commit as soon as it is durable locally (`sync_binlog
 ## Deploy
 
 ```bash
-# config/ha.yml: ha_provider: async-replication; config/secrets.yml: mysql_replication_password
+# config/ha.yml: ha_provider: async-replication; config/secrets.yml: db_replication_password
 make provision          # MySQL + accounts on every node
 make ha HA=async-replication
 make topology

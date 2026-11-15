@@ -3,7 +3,7 @@
 # refuses (fails) when it would collide with something already running there.
 #   make plan-host            (also runs automatically at the start of make provision)
 - name: Host impact plan
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   vars:

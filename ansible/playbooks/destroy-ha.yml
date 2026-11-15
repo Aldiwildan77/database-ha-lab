@@ -13,7 +13,7 @@
         quiet: true
 
 - name: Tear down HA provider
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: true
   become: true
   pre_tasks:
@@ -30,103 +30,16 @@
       ansible.builtin.set_fact:
         destroy_provider: "{{ (deployed.content | b64decode | trim) if deployed.content is defined else ha_provider }}"
 
-    - name: Stop Orchestrator
-      ansible.builtin.systemd_service:
-        name: orchestrator
-        state: stopped
-        enabled: false
-      failed_when: false
-      when: destroy_provider == 'orchestrator'
-
-    - name: Remove Orchestrator state
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop: [/etc/orchestrator.conf.json, /var/lib/orchestrator]
-      when: destroy_provider == 'orchestrator'
-
-    - name: Stop MySQL Router
-      ansible.builtin.systemd_service:
-        name: mysqlrouter
-        state: stopped
-        enabled: false
-      failed_when: false
-      when: destroy_provider == 'innodb-cluster'
-
-    - name: Remove MySQL Router bootstrap
-      ansible.builtin.file:
-        path: /etc/mysqlrouter/mysqlrouter.conf
-        state: absent
-      when: destroy_provider == 'innodb-cluster'
-
-    - name: Dissolve InnoDB Cluster
-      ansible.builtin.command:
-        argv:
-          - mysqlsh
-          - --js
-          - --passwords-from-stdin
-          - "clusteradmin@{{ node_fqdn }}:{{ mysql_port }}"
-          - -e
-          - "try { dba.getCluster().dissolve({force: true}); print('dissolved'); } catch (e) { print(e.message); }"
-        stdin: "{{ mysql_admin_password }}"
-      run_once: true
-      no_log: true
-      changed_when: true
-      failed_when: false
-      when: destroy_provider == 'innodb-cluster'
-
-    - name: Stop Group Replication and drop its persisted settings
-      ansible.mysql.mysql_query:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        query:
-          - STOP GROUP_REPLICATION
-          - SET PERSIST group_replication_start_on_boot = OFF
-      failed_when: false
-      when: destroy_provider == 'innodb-cluster'
-
-    - name: Remove asynchronous replication
-      ansible.mysql.mysql_query:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        query:
-          - STOP REPLICA
-          - RESET REPLICA ALL
-      failed_when: false
-      when: destroy_provider in ['async-replication', 'semi-sync', 'orchestrator']
-
-    - name: Disable semi-sync
-      ansible.mysql.mysql_query:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        query:
-          - SET PERSIST rpl_semi_sync_source_enabled = OFF
-          - SET PERSIST rpl_semi_sync_replica_enabled = OFF
-      failed_when: false
-      when: destroy_provider == 'semi-sync'
-
-    - name: Make nodes standalone and writable
-      ansible.mysql.mysql_query:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        query:
-          - SET PERSIST super_read_only = OFF
-          - SET PERSIST read_only = OFF
-      failed_when: false
-      when: destroy_provider != 'percona-xtradb-cluster'
-
-    - name: Refuse to dismantle Galera without destroy_data
-      ansible.builtin.fail:
-        msg: >-
-          Percona XtraDB Cluster cannot be turned into standalone Oracle MySQL in place.
-          Re-run with -e destroy_data=true to purge packages and data, or keep the cluster.
-      when:
-        - destroy_provider == 'percona-xtradb-cluster'
-        - not (destroy_data | default(false) | bool)
+    - name: Tear down the deployed provider ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/destroy-teardown.yml"
 
     - name: Remove provider marker
       ansible.builtin.file:
         path: "{{ lab_engine.marker_dir }}/.ha-lab-provider"
         state: absent
 
-- name: Purge MySQL and data (destroy_data=true)
-  hosts: mysql_nodes
+- name: Purge the database and data (destroy_data=true)
+  hosts: db_nodes
   gather_facts: false
   become: true
   tasks:
@@ -134,29 +47,8 @@
       ansible.builtin.meta: end_play
       when: not (destroy_data | default(false) | bool)
 
-    - name: Stop MySQL
-      ansible.builtin.service:
-        name: "{{ item }}"
-        state: stopped
-      loop: [mysql, mysql@bootstrap]
-      failed_when: false
-
-    - name: Purge server packages
-      ansible.builtin.apt:
-        name:
-          - mysql-server
-          - mysql-community-server
-          - mysql-community-server-core
-          - mysql-router
-          - mysql-router-community
-          - mysql-shell
-          - percona-xtradb-cluster
-          - percona-xtradb-cluster-server
-          - percona-xtradb-cluster-client
-          - percona-orchestrator
-        state: absent
-        purge: true
-        autoremove: true
+    - name: Stop the server and purge packages and data ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/destroy-purge.yml"
 
     - name: Remove lab firewall table
       ansible.builtin.systemd_service:
@@ -165,15 +57,10 @@
         enabled: false
       failed_when: false
 
-    - name: Delete datadir, config and markers
+    - name: Delete lab firewall config and markers
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
-        - /var/lib/mysql
-        - /var/lib/mysql-files
-        - /etc/mysql
-        - /etc/mysqlrouter
-        - /etc/apt/preferences.d/mysql
         - /etc/halab
         - /etc/systemd/system/halab-firewall.service

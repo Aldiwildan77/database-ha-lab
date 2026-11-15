@@ -17,7 +17,12 @@ exporter:
   role: mysql-exporter           # mysqld_exporter also speaks to MariaDB
   name: mysqld_exporter
   up_metric: mysql_up
-collector: engine_mariadb
+collector:
+  module: engine_mariadb
+  run_as: mysqld_exporter
+  after: mariadb.service
+  connect: {user: exporter, socket: /run/mysqld/mysqld.sock}
+ansible_collections: [ansible.mysql]
 ports:
   mariadb: {default: 13306, standard: 3306, config: mariadb.port}
   mariadb_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
@@ -72,5 +77,6 @@ ha:
     max_nodes: null
     mesh_ports: [mariadb, maxscale_admin]
     client_ports: [mariadb, maxscale_rw]
+    ha_endpoint: {port: maxscale_rw, target: maxscale, mode: first-available}
     provision: [{role: mariadb}]
     deploy: [{role: mariadb-replication}, {role: maxscale}]
