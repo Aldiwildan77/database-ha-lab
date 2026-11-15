@@ -2,7 +2,7 @@
 """Benchmark runner: one run = one run_id directory under benchmark/results/.
 
   run.py --scenario mixed-workload
-  run.py --scenario failover-test --fault stop-mysql --confirm yes
+  run.py --scenario failover-test --fault stop-db --confirm yes
   run.py --scenario network-disruption --fault netem --netem "delay 150ms 20ms loss 2%" --confirm yes
 
 Produces metadata.json, context.json, network.json, jmeter.jtl, failover-events.json, ledger/,
@@ -31,8 +31,10 @@ import netprobe  # noqa: E402
 
 SCENARIOS = ["baseline", "read-heavy", "write-heavy", "mixed-workload", "spike-test", "soak-test",
              "failover-test", "network-disruption"]
-FAULTS = ["none", "stop-mysql", "kill-mysql", "isolate", "netem"]
-SCENARIO_FAULT = {"failover-test": "stop-mysql", "network-disruption": "netem"}
+FAULT_ALIASES = {"stop-mysql": "stop-db", "kill-mysql": "kill-db"}   # old names still accepted
+FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", *FAULT_ALIASES]
+SCENARIO_FAULT = {"failover-test": "stop-db", "network-disruption": "netem"}
+SERVER_FAULTS = ("stop-db", "kill-db", "isolate")
 
 
 def now():
@@ -157,7 +159,7 @@ def client_network(ctx, samples=10):
     ntype = {n["name"]: n.get("network_type", "tailscale") for n in ctx["nodes"]}
     for name, addr in ctx["addresses"].items():
         rtts, sent, ok = netprobe.ping(addr, count=samples)
-        tcp = [d for d in (netprobe.tcp_connect(addr, ctx["mysql_port"]) for _ in range(5)) if d is not None]
+        tcp = [d for d in (netprobe.tcp_connect(addr, ctx.get("db_port", ctx["mysql_port"])) for _ in range(5)) if d is not None]
         direct, ts_rtt, path = netprobe.tailscale_ping(addr) if ntype.get(name) == "tailscale" else (None, None, "")
         srt = sorted(rtts)
         out.append({"node": name, "address": addr, "rtt_avg_s": sum(rtts) / len(rtts) if rtts else None,
@@ -194,7 +196,7 @@ def main():
     ap.add_argument("--scenario", required=True, choices=SCENARIOS)
     ap.add_argument("--endpoint", help="ha | primary | <node name>; default from config/benchmark.yml")
     ap.add_argument("-J", "--prop", action="append", default=[], help="JMeter property override k=v")
-    ap.add_argument("--fault", choices=FAULTS, help="default: stop-mysql for failover-test, netem for network-disruption")
+    ap.add_argument("--fault", choices=FAULTS, help="default: stop-db for failover-test, netem for network-disruption (stop-mysql/kill-mysql are aliases)")
     ap.add_argument("--fault-node", help="default: the current primary")
     ap.add_argument("--fault-at", type=float, help="seconds after load start (default: 1/3 of duration)")
     ap.add_argument("--fault-duration", type=float, default=60, help="seconds until the fault is restored")
@@ -211,6 +213,7 @@ def main():
     a = ap.parse_args()
 
     fault = a.fault or SCENARIO_FAULT.get(a.scenario, "none")
+    fault = FAULT_ALIASES.get(fault, fault)
     if fault != "none" and a.confirm != "yes":
         raise SystemExit(f"Fault '{fault}' disrupts the cluster. Re-run with --confirm yes (make ... CONFIRM=yes).")
 
@@ -232,7 +235,7 @@ def main():
 
     props = {
         "run_id": run_id, "endpoints": ",".join(ctx["endpoint"]["endpoints"]), "endpoint_mode": ctx["endpoint"]["mode"],
-        "database": ctx["database"], "lab_script_dir": os.path.join(ROOT, "jmeter", "scripts"),
+        "database": ctx["database"], "db_engine": ctx.get("db_engine", "mysql"), "lab_script_dir": os.path.join(ROOT, "jmeter", "scripts"),
         "ssl_mode": ctx.get("ssl_mode", "PREFERRED"),
         "rows": dataset.get("rows", 100000), "seed": dataset.get("seed", 42),
     }
@@ -326,7 +329,7 @@ def main():
 
             promote_after = a.promote_after if a.promote_after is not None else float(
                 (bench.get("failover") or {}).get("manual_promotion_delay_seconds", 10))
-            manual = not ctx["auto_failover"] and fault in ("stop-mysql", "kill-mysql", "isolate")
+            manual = not ctx["auto_failover"] and fault in SERVER_FAULTS
             promoted = False
             while jm.poll() is None and now() - t_inj < a.fault_duration:
                 if manual and not a.no_promote and not promoted and events.has("primary_unavailable"):
@@ -343,7 +346,7 @@ def main():
             ansible("fault.yml", {**base, "action": "restore"}, check=False)
             restored = True
             events.add("fault_restored", t_res, completed_at=iso(now()))
-            if manual and promoted and fault in ("stop-mysql", "kill-mysql", "isolate"):
+            if manual and promoted and fault in SERVER_FAULTS:
                 p = ansible("recover.yml", {"node": fault_node}, check=False)
                 events.add("old_primary_rejoined" if p.returncode == 0 else "old_primary_rejoin_failed", now())
         jm.wait()

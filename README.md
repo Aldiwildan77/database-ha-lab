@@ -117,7 +117,7 @@ Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha HA=<provider> | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
-Faults          make fault NODE= FAULT=stop-mysql|kill-mysql|isolate|netem [ACTION=restore] CONFIRM=yes
+Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem [ACTION=restore] CONFIRM=yes
 Benchmark       make jmeter-install | benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
 Reports         make report [RUN=<run_id>]
 Status          make status

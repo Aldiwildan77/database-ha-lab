@@ -1,7 +1,7 @@
 ---
 # Controlled fault injection. Destructive for availability: requires -e confirm=yes.
 # Acts on the node's lab interface (tailscale0, eth1, wg0, ...).
-#   -e node=<name> -e fault=stop-mysql|kill-mysql|isolate|netem -e action=inject|restore
+#   -e node=<name> -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore   (stop-mysql, kill-mysql still accepted)
 #   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
 - name: Fault injection
   hosts: "{{ node | default('none') }}"
@@ -10,34 +10,36 @@
   vars:
     fault_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports) | map('int') | unique | list }}"
     max_seconds: 600
+    fault_kind: "{{ {'stop-mysql': 'stop-db', 'kill-mysql': 'kill-db'}.get(fault, fault) }}"
   tasks:
     - name: Require confirmation
       ansible.builtin.assert:
         that:
           - confirm | default('') == 'yes'
-          - fault in ['stop-mysql', 'kill-mysql', 'isolate', 'netem']
+          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem']
           - action | default('inject') in ['inject', 'restore']
-        fail_msg: "Pass -e confirm=yes -e fault=stop-mysql|kill-mysql|isolate|netem -e action=inject|restore"
+        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore"
         quiet: true
 
-    - name: Stop MySQL gracefully
+    - name: Stop the database gracefully
       ansible.builtin.systemd_service:
-        name: mysql
+        name: "{{ lab_engine.service }}"
         state: stopped
-      when: fault == 'stop-mysql' and action | default('inject') == 'inject'
+      when: fault_kind == 'stop-db' and action | default('inject') == 'inject'
 
-    # systemd may restart mysqld after SIGKILL, as it would after a real crash.
-    - name: Kill mysqld (SIGKILL)
-      ansible.builtin.command: pkill -9 -x mysqld
+    # systemd may restart the server after SIGKILL, as it would after a real crash.
+    - name: Kill the database server (SIGKILL)
+      ansible.builtin.command:
+        argv: [pkill, "-9", -x, "{{ lab_engine.process_names | first }}"]
       changed_when: true
       failed_when: false
-      when: fault == 'kill-mysql' and action | default('inject') == 'inject'
+      when: fault_kind == 'kill-db' and action | default('inject') == 'inject'
 
-    - name: Start MySQL
+    - name: Start the database
       ansible.builtin.systemd_service:
-        name: mysql
+        name: "{{ lab_engine.service }}"
         state: started
-      when: fault in ['stop-mysql', 'kill-mysql'] and action == 'restore'
+      when: fault_kind in ['stop-db', 'kill-db'] and action == 'restore'
 
     - name: Isolate database traffic (SSH and exporters stay reachable)
       ansible.builtin.shell: |

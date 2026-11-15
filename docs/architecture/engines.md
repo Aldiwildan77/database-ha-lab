@@ -15,7 +15,10 @@ Status: step 1 and part of step 2 are implemented (see "Implemented" below). Rol
 
 - Metrics: the collector is split into `ha_lab_collector.py` (generic loader) and `engine_mysql.py`. The neutral names are `ha_lab_db_up` and `ha_lab_replication_position` (were `ha_lab_mysql_up` and `ha_lab_gtid_executed_transactions`). The Prometheus job is `db` (was `mysqld`). The descriptor names the exporter role, exporter name, up metric and collector module. MySQL-only recording rules moved to `rules/engine-mysql.yml`, and the availability alert is `DatabaseDown` on `ha_lab_db_up`. Renamed metrics break old dashboards and saved queries; the generated dashboards are updated.
 
-Still hard-coded: `mysql_*` variable names, the `lab-collector` role's credentials and socket path, the collectors, JMeter, and the roles' location under `ansible/roles/`.
+- JMeter: engine SQL differences live in `jmeter/scripts/dialects/<engine>.groovy` (class `LabDialect`: JDBC URL, read-only probe, `now()`, schema DDL, dataset upsert, error-code classification). `LabDb`, `prepare` and `transaction` call the dialect, selected by the `db_engine` JMeter property that the runner sets from `context.json`. The driver jar per engine is listed in `jmeter/drivers/<engine>.env`, and `make jmeter-install` installs the driver of the configured engine. The `mysql` dialect ran against a MySQL 8.4 container (12,176 samples, 0 errors). The `mariadb` and `postgres` dialects are untested.
+- Faults: `stop-db` and `kill-db` replace `stop-mysql` and `kill-mysql` (both old names still work). `fault.yml` takes the service and process name from the descriptor.
+
+Still hard-coded: the ledger and consistency SQL in `consistency.yml`, the replication-lag query in `report.py`, `mysql_*` variable names, the `lab-collector` role's credentials and socket path, the collectors, JMeter, and the roles' location under `ansible/roles/`.
 
 ## Planned engines
 

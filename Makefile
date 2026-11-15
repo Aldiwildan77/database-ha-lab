@@ -116,14 +116,14 @@ recover: validate-config ## Bring a failed node back: make recover NODE=<node>
 	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node>"; exit 1; }
 	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE)
 
-fault: validate-config ## make fault NODE=<n> FAULT=<stop-mysql|kill-mysql|isolate|netem> [ACTION=restore] CONFIRM=yes
+fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem> [ACTION=restore] CONFIRM=yes
 	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }
 	@[ -n "$(NODE)" ] && [ -n "$(FAULT)" ] || { echo "usage: make fault NODE=<node> FAULT=<type> [ACTION=inject|restore] CONFIRM=yes"; exit 1; }
 	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(NETEM),-e '{"netem": "$(NETEM)"}')
 
 # ---------------------------------------------------------------- Benchmark
-jmeter-install: ## Install JMeter 5.6.3 + Connector/J into local/tools
-	jmeter/install.sh
+jmeter-install: ## Install JMeter 5.6.3 + the JDBC driver of the configured db_engine into local/tools
+	jmeter/install.sh $$(local/scripts/lab-var.sh db_engine 2>/dev/null || echo mysql)
 
 scenarios: ## Regenerate jmeter/scenarios/*.jmx
 	python3 -I jmeter/build-scenarios.py
@@ -138,10 +138,10 @@ benchmark: validate-config ## make benchmark SCENARIO=<name> [ENDPOINT=ha|primar
 	  $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(foreach p,$(J),-J $(p)) \
 	  $(if $(FAULT),--fault $(FAULT)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(RUN_ARGS)
 
-failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-mysql|kill-mysql|isolate]
+failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate]
 	@[ "$(CONFIRM)" = yes ] || { echo "The failover experiment stops the primary. Add CONFIRM=yes."; exit 1; }
 	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario failover-test \
-	  --fault $(or $(FAULT),stop-mysql) --confirm yes --endpoint $(or $(ENDPOINT),ha) $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
+	  --fault $(or $(FAULT),stop-db) --confirm yes --endpoint $(or $(ENDPOINT),ha) $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
 
 report: ## Rebuild a report: make report [RUN=<run_id>] (default: latest)
 	@run="$(or $(RUN),$$(ls -1d benchmark/results/run-* 2>/dev/null | sort | tail -1 | xargs -n1 basename))"; \
