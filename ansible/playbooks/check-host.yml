@@ -70,11 +70,6 @@
       ansible.builtin.set_fact:
         host_conflicts: >-
           {%- set c = [] -%}
-          {%- set hv = ['proxmox-ve', 'pve-manager', 'libvirt-daemon-system', 'xcp-ng-release'] | select('in', host_packages) | list -%}
-          {%- if hv and not (allow_hypervisor | default(false) | bool) -%}
-          {%- set _ = c.append('this is a hypervisor host (' ~ hv | join(', ') ~ '); create VMs on it and use those as nodes '
-                ~ '(override: -e allow_hypervisor=true)') -%}
-          {%- endif -%}
           {%- for p in conflicting_packages if p in host_packages and not host_lab_managed -%}
           {%- set _ = c.append('package ' ~ p ~ ' is installed (another MySQL/MariaDB server)') -%}
           {%- endfor -%}
@@ -92,7 +87,6 @@
           node: "{{ inventory_hostname }}"
           already_lab_managed: "{{ host_lab_managed }}"
           os: "{{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }}"
-          virtualization: "{{ ansible_virtualization_type | default('none') }} ({{ ansible_virtualization_role | default('n/a') }})"
           memory_available_mb: "{{ host_memavail.stdout | int }}"
           mysql_buffer_pool_mb: "{{ host_planned_pool_mb }}"
           apt_repository: "{{ 'repo.percona.com (' ~ ha_provider ~ ')' if pxc else 'repo.mysql.com (pinned to mysql-* packages only)' }}"
