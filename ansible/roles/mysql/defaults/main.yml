@@ -1,0 +1,41 @@
+---
+mysql_repo_components:
+  "8.4": mysql-8.4-lts
+  "8.0": mysql-8.0
+mysql_repo_key_url: https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+mysql_packages:
+  - mysql-server
+  - mysql-client
+mysql_socket: /var/run/mysqld/mysqld.sock
+mysql_datadir: /var/lib/mysql
+mysql_config_file: /etc/mysql/mysql.conf.d/zz-ha-lab.cnf
+mysql_marker_file: /etc/mysql/.ha-lab-managed
+
+# Set true to let the lab take over a MySQL datadir it did not create.
+mysql_adopt_existing: false
+
+mysql_buffer_pool_mb: "{{ [128, (ansible_memtotal_mb * 0.5) | int] | max }}"
+
+mysql_base_config:
+  server_id: "{{ node_server_id }}"
+  report_host: "{{ node_fqdn }}"
+  port: "{{ mysql_port }}"
+  bind_address: "*"
+  skip_name_resolve: "ON"
+  max_connections: 500
+  gtid_mode: "ON"
+  enforce_gtid_consistency: "ON"
+  log_bin: mysql-bin
+  binlog_expire_logs_seconds: 604800
+  innodb_buffer_pool_size: "{{ mysql_buffer_pool_mb }}M"
+  innodb_flush_log_at_trx_commit: 1
+  sync_binlog: 1
+  slow_query_log: "ON"
+  long_query_time: 1
+  performance_schema: "ON"
+  performance_schema_consumer_events_transactions_current: "ON"
+  performance_schema_consumer_events_transactions_history: "ON"
+
+mysql_effective_config: "{{ mysql_base_config | combine(mysql_config, mysql_node_config) }}"
+
+mysql_exporter_user: exporter

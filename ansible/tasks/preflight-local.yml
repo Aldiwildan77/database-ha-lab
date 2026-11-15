@@ -1,0 +1,41 @@
+---
+- name: Read local Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: lab_ts_local
+  changed_when: false
+  failed_when: false
+
+- name: Assert this machine is connected to Tailscale
+  ansible.builtin.assert:
+    that:
+      - lab_ts_local.rc == 0
+      - (lab_ts_local.stdout | from_json).BackendState == 'Running'
+    fail_msg: "Tailscale is not running on this machine: {{ lab_ts_local.stderr | default('') | trim }}"
+    quiet: true
+
+- name: Resolve node addresses
+  ansible.builtin.import_tasks: resolve-node-addresses.yml
+
+- name: Tailscale ping each node
+  ansible.builtin.command:
+    argv: [tailscale, ping, --c, "3", --timeout, 5s, "{{ hostvars[item].node_fqdn }}"]
+  loop: "{{ groups['mysql_nodes'] }}"
+  register: lab_ts_ping
+  changed_when: false
+  failed_when: false
+
+- name: Assert every node answers tailscale ping
+  ansible.builtin.assert:
+    that: item.stdout is search('pong from')
+    fail_msg: "{{ item.item }} did not answer tailscale ping: {{ (item.stdout ~ ' ' ~ item.stderr) | trim }}"
+    quiet: true
+  loop: "{{ lab_ts_ping.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Report local-to-node Tailscale path
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ item.stdout_lines | select('search', 'pong') | last }}"
+  loop: "{{ lab_ts_ping.results }}"
+  loop_control:
+    label: "{{ item.item }}"

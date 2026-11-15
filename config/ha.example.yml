@@ -1,0 +1,16 @@
+---
+# async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
+ha_provider: async-replication
+
+mysql:
+  version: "8.4"   # "8.4" or "8.0"
+  port: 3306
+  config: {}       # extra my.cnf [mysqld] options for all nodes
+
+monitoring:
+  enabled: true
+  mysql_exporter_port: 9104
+  node_exporter_port: 9100
+
+benchmark:
+  enabled: true

@@ -1,0 +1,44 @@
+groups:
+  - name: lab-resource
+    rules:
+      - record: lab:node_cpu_utilization:ratio
+        expr: 1 - avg without (cpu, mode) (rate(node_cpu_seconds_total{mode="idle"}[1m]))
+      - record: lab:node_memory_utilization:ratio
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+      - record: lab:node_disk_read_latency_seconds:avg1m
+        expr: rate(node_disk_read_time_seconds_total[1m]) / rate(node_disk_reads_completed_total[1m])
+      - record: lab:node_disk_write_latency_seconds:avg1m
+        expr: rate(node_disk_write_time_seconds_total[1m]) / rate(node_disk_writes_completed_total[1m])
+      - record: lab:node_tcp_retransmit:rate1m
+        expr: rate(node_netstat_Tcp_RetransSegs[1m])
+
+  - name: lab-mysql
+    rules:
+      - record: lab:mysql_queries:rate1m
+        expr: rate(mysql_global_status_queries[1m])
+      - record: lab:mysql_transactions:rate1m
+        expr: sum without (command) (rate(mysql_global_status_commands_total{command=~"commit|rollback"}[1m]))
+
+  - name: lab-availability
+    rules:
+      - alert: ExporterDown
+        expr: up{job=~"node|mysqld"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} exporter on {{ $labels.node }} is unreachable"
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL on {{ $labels.node }} is down"
+      - alert: ClockNotSynchronised
+        expr: node_timex_sync_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Clock on {{ $labels.node }} is not synchronised"

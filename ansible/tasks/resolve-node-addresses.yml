@@ -1,0 +1,51 @@
+---
+# Runs on localhost. Sets lab_node_addresses: {node: address Prometheus and health checks use}.
+- name: Resolve node FQDNs on this machine
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - |
+        import ipaddress, json, socket, sys
+        nets = [ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48")]
+        try:
+            infos = socket.getaddrinfo(sys.argv[1], None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror as e:
+            print(json.dumps({"error": str(e), "addresses": [], "tailscale": []})); sys.exit(0)
+        addrs = sorted({i[4][0] for i in infos}, key=lambda a: (":" in a, a))
+        ts = [a for a in addrs if any(ipaddress.ip_address(a) in n for n in nets)]
+        print(json.dumps({"addresses": addrs, "tailscale": ts}))
+      - "{{ hostvars[item].node_fqdn }}"
+  loop: "{{ groups['mysql_nodes'] }}"
+  register: lab_dns
+  changed_when: false
+
+- name: Build DNS result map
+  ansible.builtin.set_fact:
+    lab_node_dns: "{{ dict(groups['mysql_nodes'] | zip(lab_dns.results | map(attribute='stdout') | map('from_json'))) }}"
+
+- name: Assert every FQDN resolves to a Tailscale address
+  ansible.builtin.assert:
+    that:
+      - lab_node_dns[item].tailscale | length > 0
+      - hostvars[item].node_tailscale_ip == '' or hostvars[item].node_tailscale_ip in lab_node_dns[item].tailscale
+    fail_msg: >-
+      {{ hostvars[item].node_fqdn }} ({{ item }}) resolved to
+      {{ lab_node_dns[item].error | default(lab_node_dns[item].addresses) }}; expected a Tailscale
+      address{{ (' matching tailscale_ip ' ~ hostvars[item].node_tailscale_ip) if hostvars[item].node_tailscale_ip else '' }}.
+      Check MagicDNS and that the node is online (tailscale status).
+    quiet: true
+  loop: "{{ groups['mysql_nodes'] }}"
+
+- name: Build node address map
+  ansible.builtin.set_fact:
+    lab_node_addresses: >-
+      {%- set out = {} -%}
+      {%- for n in groups['mysql_nodes'] -%}
+      {%- if (lab_monitoring.scrape_address | default('ip')) == 'fqdn' -%}
+      {%- set _ = out.update({n: hostvars[n].node_fqdn}) -%}
+      {%- else -%}
+      {%- set _ = out.update({n: hostvars[n].node_tailscale_ip or lab_node_dns[n].tailscale[0]}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out }}

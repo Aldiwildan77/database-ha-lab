@@ -1,0 +1,21 @@
+[Unit]
+Description=Prometheus MySQL Exporter (mysql-ha-lab)
+Wants=network-online.target
+After=network-online.target mysql.service
+
+[Service]
+User=mysqld_exporter
+Group=mysqld_exporter
+ExecStart=/usr/local/bin/mysqld_exporter \
+  --config.my-cnf={{ mysqld_exporter_config }} \
+  --web.listen-address=:{{ mysql_exporter_port }}{% for c in mysqld_exporter_collectors %} \
+  --collect.{{ c }}{% endfor %}
+
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

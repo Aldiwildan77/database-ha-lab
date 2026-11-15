@@ -1,0 +1,45 @@
+---
+- name: Install exporters on MySQL nodes
+  hosts: mysql_nodes
+  gather_facts: true
+  become: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+    - name: Skip when monitoring is disabled
+      ansible.builtin.meta: end_play
+      when: not (monitoring_enabled | bool)
+  roles:
+    - node-exporter
+    - mysql-exporter
+
+- name: Verify exporters from this machine over Tailscale
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Resolve node addresses
+      ansible.builtin.import_tasks: ../tasks/resolve-node-addresses.yml
+
+    - name: Scrape exporters
+      ansible.builtin.uri:
+        url: "http://{{ addr }}:{{ item.1 }}/metrics"
+        return_content: true
+        timeout: 10
+      vars:
+        addr: "{{ ('[' ~ lab_node_addresses[item.0] ~ ']') if ':' in lab_node_addresses[item.0] else lab_node_addresses[item.0] }}"
+      loop: "{{ groups['mysql_nodes'] | product([node_exporter_port, mysql_exporter_port]) | list }}"
+      loop_control:
+        label: "{{ item.0 }}:{{ item.1 }}"
+      register: exporter_scrape
+      when: monitoring_enabled | bool
+
+    - name: Assert mysqld_exporter can reach MySQL
+      ansible.builtin.assert:
+        that: item.content is search('(?m)^mysql_up 1')
+        fail_msg: "{{ item.item.0 }}: mysqld_exporter reports mysql_up != 1 (check exporter credentials)"
+        quiet: true
+      loop: "{{ exporter_scrape.results | selectattr('item.1', 'equalto', mysql_exporter_port) | list }}"
+      loop_control:
+        label: "{{ item.item.0 }}"
+      when: monitoring_enabled | bool

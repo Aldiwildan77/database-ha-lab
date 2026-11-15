@@ -1,0 +1,43 @@
+---
+# SSH is allowed before the default-deny policy is enabled to avoid lockout.
+- name: Allow SSH on all interfaces
+  community.general.ufw:
+    rule: allow
+    port: "{{ ansible_port | default(22) | string }}"
+    proto: tcp
+    comment: ha-lab ssh
+  when: common_firewall_ssh_allow_all_interfaces | bool
+
+- name: Allow SSH on tailscale0
+  community.general.ufw:
+    rule: allow
+    interface: tailscale0
+    direction: in
+    port: "{{ ansible_port | default(22) | string }}"
+    proto: tcp
+    comment: ha-lab ssh
+  when: not (common_firewall_ssh_allow_all_interfaces | bool)
+
+- name: Allow Tailscale direct connections
+  community.general.ufw:
+    rule: allow
+    port: "41641"
+    proto: udp
+    comment: tailscale
+
+- name: Allow lab ports from permitted Tailscale sources
+  community.general.ufw:
+    rule: allow
+    interface: tailscale0
+    direction: in
+    from_ip: "{{ item.0 }}"
+    to_port: "{{ item.1 | string }}"
+    proto: tcp
+    comment: ha-lab
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports) | list }}"
+
+- name: Enable firewall with default deny incoming
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming

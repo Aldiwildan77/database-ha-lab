@@ -1,0 +1,13 @@
+---
+# Used from Phase 6 (JMeter).
+client_location: local
+endpoint: primary   # primary | <node name> | ha
+database: halab
+dataset:
+  rows: 100000
+  seed: 42
+load:
+  threads: 16
+  ramp_up_seconds: 30
+  duration_seconds: 300
+  read_ratio: 0.5

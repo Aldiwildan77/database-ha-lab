@@ -1,0 +1,4 @@
+---
+# Do not edit: hosts come from config/inventory.yml via the lab_config plugin.
+plugin: lab_config
+config_dir: ../../config

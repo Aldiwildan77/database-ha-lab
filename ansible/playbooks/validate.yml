@@ -1,0 +1,49 @@
+---
+# Config schema is validated by the lab_config inventory plugin before this runs.
+- name: Validate local configuration and connectivity
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [local]
+  tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+
+    - name: Check required secrets
+      ansible.builtin.assert:
+        that: mysql_exporter_password | length >= 16
+        fail_msg: >-
+          mysql_exporter_password is missing or shorter than 16 characters.
+          Set it in config/secrets.yml or LAB_MYSQL_EXPORTER_PASSWORD.
+        quiet: true
+      no_log: true
+      when: monitoring_enabled | bool
+
+    - name: Check local Tailscale, DNS and reachability
+      ansible.builtin.import_tasks: ../tasks/preflight-local.yml
+
+- name: Validate remote nodes
+  hosts: mysql_nodes
+  gather_facts: false
+  tags: [remote]
+  tasks:
+    - name: Run node preflight
+      ansible.builtin.import_tasks: ../tasks/preflight-node.yml
+
+    - name: Assert supported OS and architecture
+      ansible.builtin.assert:
+        that:
+          - (ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['22.04', '24.04'])
+            or (ansible_distribution == 'Debian' and ansible_distribution_major_version == '12')
+          - ansible_architecture == 'x86_64'
+        fail_msg: >-
+          {{ inventory_hostname }}: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          {{ ansible_architecture }} is not supported (Ubuntu 22.04/24.04 or Debian 12, x86_64).
+        quiet: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} ok: {{ ansible_distribution }} {{ ansible_distribution_version }},
+          {{ ansible_processor_vcpus }} vCPU, {{ ansible_memtotal_mb }} MB RAM,
+          tailscale {{ node_tailscale_ips | join(',') }}, NTP synced={{ node_ntp.stdout | trim }}

@@ -1,0 +1,48 @@
+---
+- name: Wait for SSH
+  ansible.builtin.wait_for_connection:
+    timeout: 30
+
+- name: Gather facts
+  ansible.builtin.setup:
+
+- name: Verify sudo works
+  ansible.builtin.command: "true"
+  become: true
+  changed_when: false
+
+- name: Read node Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: node_ts
+  changed_when: false
+  failed_when: false
+
+- name: Assert Tailscale is running on the node
+  ansible.builtin.assert:
+    that:
+      - node_ts.rc == 0
+      - (node_ts.stdout | from_json).BackendState == 'Running'
+    fail_msg: "Tailscale is not running on {{ inventory_hostname }}"
+    quiet: true
+
+- name: Record node Tailscale IPs
+  ansible.builtin.set_fact:
+    node_tailscale_ips: "{{ (node_ts.stdout | from_json).Self.TailscaleIPs }}"
+
+- name: Resolve every peer FQDN from this node
+  ansible.builtin.command:
+    argv: [getent, ahosts, "{{ hostvars[item].node_fqdn }}"]
+  loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+  register: node_peer_dns
+  changed_when: false
+  failed_when: node_peer_dns.rc != 0
+
+- name: Read clock synchronisation state
+  ansible.builtin.command: timedatectl show --property=NTPSynchronized --value
+  register: node_ntp
+  changed_when: false
+
+- name: Warn when the clock is not synchronised
+  ansible.builtin.debug:
+    msg: "WARNING: {{ inventory_hostname }} clock is not NTP-synchronised yet (chrony is installed by provisioning)."
+  when: node_ntp.stdout | trim != 'yes'

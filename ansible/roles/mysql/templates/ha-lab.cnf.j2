@@ -1,0 +1,5 @@
+# Managed by mysql-ha-lab (Ansible). Local edits are overwritten.
+[mysqld]
+{% for key, value in mysql_effective_config | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}

@@ -1,0 +1,37 @@
+---
+- name: Generate Prometheus file_sd targets from the inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    targets_dir: "{{ lab_root }}/local/prometheus/targets"
+  tasks:
+    - name: Resolve node addresses
+      ansible.builtin.import_tasks: ../tasks/resolve-node-addresses.yml
+
+    - name: Write target files
+      ansible.builtin.copy:
+        dest: "{{ targets_dir }}/{{ item.job }}.json"
+        mode: "0644"
+        content: |
+          {% set out = [] %}
+          {% for n in groups['mysql_nodes'] %}
+          {% set a = lab_node_addresses[n] %}
+          {% set hp = ('[' ~ a ~ ']') if ':' in a else a %}
+          {% set _ = out.append({
+               'targets': [hp ~ ':' ~ item.port],
+               'labels': {
+                 'environment': lab_environment,
+                 'ha_provider': ha_provider,
+                 'node': n,
+                 'role': hostvars[n].node_role,
+                 'datacenter': hostvars[n].node_datacenter,
+                 'fqdn': hostvars[n].node_fqdn,
+               }}) %}
+          {% endfor %}
+          {{ out | to_nice_json }}
+      loop:
+        - { job: node, port: "{{ node_exporter_port }}" }
+        - { job: mysqld, port: "{{ mysql_exporter_port }}" }
+      loop_control:
+        label: "{{ item.job }}"

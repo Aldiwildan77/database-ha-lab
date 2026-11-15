@@ -1,0 +1,9 @@
+---
+exclude_paths:
+  - ansible/collections/
+  - .ansible/
+  - local/
+  - config/
+# Role directory names follow the project layout (node-exporter, mysql-exporter, ...).
+skip_list:
+  - role-name

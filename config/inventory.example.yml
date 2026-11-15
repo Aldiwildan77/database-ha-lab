@@ -1,0 +1,29 @@
+---
+# All nodes must already be in your tailnet. Copy to config/inventory.yml (make init).
+environment:
+  name: lab
+  network: tailscale
+
+ssh:
+  user: ubuntu
+  port: 22
+  private_key: ~/.ssh/id_ed25519   # omit to use ssh-agent / Tailscale SSH
+  # become_password_env: LAB_BECOME_PASSWORD
+
+# role: primary | replica. Exactly one primary (initial primary / bootstrap node).
+# Optional per node: server_id, tailscale_ip, mysql ({my.cnf option: value}), ssh overrides.
+nodes:
+  - name: mysql-01
+    fqdn: mysql-01.example.ts.net
+    role: primary
+    datacenter: dc-01
+
+  - name: mysql-02
+    fqdn: mysql-02.example.ts.net
+    role: replica
+    datacenter: dc-02
+
+  - name: mysql-03
+    fqdn: mysql-03.example.ts.net
+    role: replica
+    datacenter: dc-03

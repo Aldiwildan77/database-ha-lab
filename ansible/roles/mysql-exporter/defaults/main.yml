@@ -1,0 +1,31 @@
+---
+mysqld_exporter_version: "{{ ((lab_monitoring.exporters | default({})).mysqld_exporter | default({})).version | default('0.21.0') }}"
+mysqld_exporter_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+mysqld_exporter_arch: "{{ mysqld_exporter_arch_map[ansible_architecture] }}"
+mysqld_exporter_release: "mysqld_exporter-{{ mysqld_exporter_version }}.linux-{{ mysqld_exporter_arch }}"
+mysqld_exporter_url: "https://github.com/prometheus/mysqld_exporter/releases/download/v{{ mysqld_exporter_version }}"
+mysqld_exporter_install_dir: /opt/{{ mysqld_exporter_release }}
+mysqld_exporter_config: /etc/mysqld_exporter/my.cnf
+mysqld_exporter_socket: /var/run/mysqld/mysqld.sock
+mysqld_exporter_user: exporter
+
+# perf_schema.eventsstatements is excluded: its digest_text label is high cardinality.
+mysqld_exporter_collectors_default:
+  - info_schema.innodb_metrics
+  - info_schema.processlist
+  - engine_innodb_status
+  - binlog_size
+  - perf_schema.eventsstatementssum
+  - perf_schema.eventswaits
+  - perf_schema.file_events
+  - perf_schema.tableiowaits
+  - perf_schema.indexiowaits
+  - perf_schema.tablelocks
+  - perf_schema.replication_group_members
+  - perf_schema.replication_group_member_stats
+  - perf_schema.replication_applier_status_by_worker
+mysqld_exporter_collectors: >-
+  {{ ((lab_monitoring.exporters | default({})).mysqld_exporter | default({})).collectors
+     | default(mysqld_exporter_collectors_default) }}

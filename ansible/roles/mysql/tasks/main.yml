@@ -1,0 +1,132 @@
+---
+- name: Refuse providers that use a different MySQL distribution
+  ansible.builtin.fail:
+    msg: >-
+      ha_provider={{ ha_provider }} needs Percona XtraDB Cluster packages instead of
+      Oracle MySQL. Its provisioning is not implemented yet (Phase 7).
+  when: ha_provider == 'percona-xtradb-cluster'
+
+- name: Oracle MySQL APT packages are amd64 only
+  ansible.builtin.assert:
+    that: ansible_architecture == 'x86_64'
+    fail_msg: "{{ inventory_hostname }} is {{ ansible_architecture }}; repo.mysql.com publishes amd64 packages only."
+    quiet: true
+
+- name: Check for an existing MySQL datadir
+  ansible.builtin.stat:
+    path: "{{ mysql_datadir }}/mysql.ibd"
+  register: mysql_existing_datadir
+
+- name: Check for lab ownership marker
+  ansible.builtin.stat:
+    path: "{{ mysql_marker_file }}"
+  register: mysql_marker
+
+- name: Protect data the lab did not create
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} already has a MySQL datadir at {{ mysql_datadir }} that this lab did
+      not create. Refusing to touch it. Re-run with -e mysql_adopt_existing=true to take it over
+      (config will change and mysqld will restart; data is not deleted).
+  when:
+    - mysql_existing_datadir.stat.exists
+    - not mysql_marker.stat.exists
+    - not (mysql_adopt_existing | bool)
+
+- name: Add MySQL APT repository
+  ansible.builtin.deb822_repository:
+    name: mysql
+    types: deb
+    uris: "http://repo.mysql.com/apt/{{ ansible_distribution | lower }}"
+    suites: "{{ ansible_distribution_release }}"
+    components:
+      - "{{ mysql_repo_components[mysql_version] }}"
+      - mysql-tools
+    architectures: [amd64]
+    signed_by: "{{ mysql_repo_key_url }}"
+  register: mysql_repo
+
+- name: Prefer repo.mysql.com packages over distribution packages
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/mysql
+    mode: "0644"
+    content: |
+      Package: *
+      Pin: origin repo.mysql.com
+      Pin-Priority: 1001
+
+- name: Install MySQL
+  ansible.builtin.apt:
+    name: "{{ mysql_packages }}"
+    state: present
+    update_cache: "{{ mysql_repo.changed }}"
+
+- name: Write lab MySQL configuration
+  ansible.builtin.template:
+    src: ha-lab.cnf.j2
+    dest: "{{ mysql_config_file }}"
+    mode: "0644"
+  notify: Restart mysql
+
+- name: Mark datadir as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ mysql_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by mysql-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+
+- name: Start MySQL
+  ansible.builtin.service:
+    name: mysql
+    state: started
+    enabled: true
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for MySQL socket
+  ansible.builtin.wait_for:
+    path: "{{ mysql_socket }}"
+    timeout: 120
+
+- name: Check root access over the Unix socket
+  ansible.mysql.mysql_info:
+    login_unix_socket: "{{ mysql_socket }}"
+    filter: [version, settings]
+  register: mysql_info
+  failed_when: false
+
+- name: Fail on missing socket authentication
+  ansible.builtin.fail:
+    msg: >-
+      Cannot log in as root@localhost over {{ mysql_socket }}: {{ mysql_info.msg | default('') }}.
+      The lab expects root to use auth_socket (the package default when no root password is set).
+  when: mysql_info.version is not defined
+
+- name: Assert effective server settings
+  ansible.builtin.assert:
+    that:
+      - mysql_info.version.full is version(mysql_version, '>=')
+      - mysql_info.version.full is version(mysql_version ~ '.999', '<=')
+      - mysql_info.settings.gtid_mode == 'ON'
+      - mysql_info.settings.server_id | int == node_server_id | int
+      - mysql_info.settings.performance_schema | string in ['1', 'ON', 'True', 'true']
+    fail_msg: "Unexpected MySQL state on {{ inventory_hostname }}: version {{ mysql_info.version.full }}"
+    quiet: true
+
+# sql_log_bin=0 keeps node-local accounts out of the binlog so they never
+# become errant GTIDs once replication is configured.
+- name: Create exporter account
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ mysql_socket }}"
+    name: "{{ mysql_exporter_user }}"
+    host: localhost
+    password: "{{ mysql_exporter_password }}"
+    priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
+    resource_limits:
+      MAX_USER_CONNECTIONS: 3
+    session_vars:
+      sql_log_bin: 0
+    state: present
+  no_log: true
+  when: monitoring_enabled | bool

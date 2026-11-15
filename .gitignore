@@ -1,0 +1,23 @@
+# User configuration and secrets
+config/inventory.yml
+config/ha.yml
+config/monitoring.yml
+config/benchmark.yml
+config/secrets.yml
+*.vault-pass
+.vault_pass*
+
+ansible/collections/
+local/state/*
+local/compose/.env
+local/prometheus/targets/*.json
+jmeter/results/*
+!jmeter/results/.gitkeep
+benchmark/results/*
+!benchmark/results/.gitkeep
+
+__pycache__/
+*.pyc
+.DS_Store
+.ansible/
+!local/state/.gitkeep
