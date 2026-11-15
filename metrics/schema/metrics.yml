@@ -77,7 +77,7 @@ levels:
     recording_rules: local/prometheus/rules/lab.yml
 
   4_ha:
-    topology (ha_lab_collector, all providers): [ha_lab_mysql_up, ha_lab_writable, ha_lab_read_only, ha_lab_super_read_only, ha_lab_gtid_executed_transactions]
+    topology (ha_lab_collector, all providers): [ha_lab_db_up, ha_lab_writable, ha_lab_read_only, ha_lab_super_read_only, ha_lab_replication_position]
     async_semi_sync:
       collector: [ha_lab_replica_configured, ha_lab_replica_io_running, ha_lab_replica_sql_running, ha_lab_semi_sync_source_active]
       mysqld_exporter: [mysql_slave_status_seconds_behind_source, mysql_slave_status_relay_log_space, mysql_slave_status_retrieved_gtid_set (label),

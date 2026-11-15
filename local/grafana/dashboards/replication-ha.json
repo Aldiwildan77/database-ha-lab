@@ -26,10 +26,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(ha_lab_mysql_up, environment)",
+          "query": "label_values(ha_lab_db_up, environment)",
           "refId": "environment"
         },
-        "definition": "label_values(ha_lab_mysql_up, environment)",
+        "definition": "label_values(ha_lab_db_up, environment)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -49,10 +49,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(ha_lab_mysql_up{environment=~\"$environment\"}, datacenter)",
+          "query": "label_values(ha_lab_db_up{environment=~\"$environment\"}, datacenter)",
           "refId": "datacenter"
         },
-        "definition": "label_values(ha_lab_mysql_up{environment=~\"$environment\"}, datacenter)",
+        "definition": "label_values(ha_lab_db_up{environment=~\"$environment\"}, datacenter)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -72,10 +72,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(ha_lab_mysql_up{environment=~\"$environment\",datacenter=~\"$datacenter\"}, node)",
+          "query": "label_values(ha_lab_db_up{environment=~\"$environment\",datacenter=~\"$datacenter\"}, node)",
           "refId": "node"
         },
-        "definition": "label_values(ha_lab_mysql_up{environment=~\"$environment\",datacenter=~\"$datacenter\"}, node)",
+        "definition": "label_values(ha_lab_db_up{environment=~\"$environment\",datacenter=~\"$datacenter\"}, node)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -186,7 +186,7 @@
     },
     {
       "type": "state-timeline",
-      "title": "MySQL up by node",
+      "title": "Database up by node",
       "id": 3,
       "datasource": {
         "type": "prometheus",
@@ -205,7 +205,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ha_lab_mysql_up{environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
+          "expr": "ha_lab_db_up{environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
           "legendFormat": "{{node}}"
         }
       ],
@@ -556,7 +556,7 @@
     },
     {
       "type": "timeseries",
-      "title": "GTID executed (convergence)",
+      "title": "Replication position (convergence)",
       "id": 10,
       "datasource": {
         "type": "prometheus",
@@ -575,7 +575,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ha_lab_gtid_executed_transactions{environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
+          "expr": "ha_lab_replication_position{environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
           "legendFormat": "{{node}}"
         }
       ],

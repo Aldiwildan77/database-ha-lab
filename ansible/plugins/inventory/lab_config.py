@@ -223,6 +223,11 @@ class InventoryModule(BaseInventoryPlugin):
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
             "mysql_exporter_port": ports.get("mysql_exporter"),
             "db_port": mysql_port,
+            "db_exporter_port": ports[engine["exporter_port"]],
+            "db_exporter_role": engine["exporter"]["role"],
+            "db_exporter_name": engine["exporter"]["name"],
+            "db_exporter_up_metric": engine["exporter"]["up_metric"],
+            "db_collector_module": engine["collector"],
             "node_exporter_port": ports["node_exporter"],
             "lab_collector_port": ports["lab_collector"],
             "lab_monitoring": mon,
@@ -297,6 +302,12 @@ class InventoryModule(BaseInventoryPlugin):
     def _check_descriptor(fname, data):
         """Fail early on descriptor typos: unknown port names, missing keys."""
         known = set((data.get("ports") or {}))
+        for key in ("exporter", "collector"):
+            if not data.get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: {key} is required")
+        for key in ("role", "name", "up_metric"):
+            if not (data["exporter"] or {}).get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: exporter.{key} is required")
         for key in ("primary_port", "exporter_port"):
             if data.get(key) not in known:
                 raise AnsibleParserError(f"lab_config: {fname}: {key} '{data.get(key)}' is not in ports")

@@ -13,6 +13,11 @@ helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
 marker_dir: /etc/mysql
 primary_port: mariadb
 exporter_port: mariadb_exporter
+exporter:
+  role: mysql-exporter           # mysqld_exporter also speaks to MariaDB
+  name: mysqld_exporter
+  up_metric: mysql_up
+collector: engine_mariadb
 ports:
   mariadb: {default: 13306, standard: 3306, config: mariadb.port}
   mariadb_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}

@@ -19,6 +19,11 @@ marker_dir: /etc/mysql           # .ha-lab-managed and .ha-lab-provider live her
 #   span:   consecutive ports reserved (router RW port + 1 for read-only)
 primary_port: mysql             # port clients connect to
 exporter_port: mysql_exporter    # port of the engine metrics exporter
+exporter:
+  role: mysql-exporter           # installs the exporter on every node
+  name: mysqld_exporter
+  up_metric: mysql_up            # 1 when the exporter can reach the database
+collector: engine_mysql          # metrics/collectors/<collector>.py, loaded by ha_lab_collector.py
 ports:
   mysql: {default: 13306, standard: 3306, config: mysql.port}
   mysql_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}

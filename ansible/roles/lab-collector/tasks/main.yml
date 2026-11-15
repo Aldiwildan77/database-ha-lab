@@ -20,7 +20,7 @@
     owner: mysqld_exporter
     group: mysqld_exporter
     mode: "0600"
-    content: "{{ {'user': 'exporter', 'password': mysql_exporter_password, 'socket': '/var/run/mysqld/mysqld.sock',
+    content: "{{ {'engine': db_engine, 'user': 'exporter', 'password': mysql_exporter_password, 'socket': '/var/run/mysqld/mysqld.sock',
                   'port': lab_collector_port, 'buckets': lab_collector_buckets} | to_nice_json }}\n"
   no_log: true
   notify: Restart ha-lab-collector

@@ -63,9 +63,9 @@ UPMAP = {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color
 # ---------------- MySQL overview
 m = D()
 m.row("Availability")
-m.add("stat", "MySQL up", [(f"mysql_up{{{SEL}}}", "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
+m.add("stat", "Database up", [(f"mysql_up{{{SEL}}}", "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
 m.add("stat", "Uptime", [(f"mysql_global_status_uptime{{{SEL}}}", "{{node}}")], unit="s", w=8, h=4)
-m.add("stat", "Exporter scrape up", [(f'up{{job="mysqld",{SEL}}}', "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
+m.add("stat", "Exporter scrape up", [(f'up{{job="db",{SEL}}}', "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
 m.row("Throughput")
 m.add("timeseries", "Queries / s", [(f"rate(mysql_global_status_queries{{{SEL}}}[$__rate_interval])", "{{node}}")], unit="qps")
 m.add("timeseries", "Transactions / s (commit + rollback)", [(f'sum by (node) (rate(mysql_global_status_commands_total{{command=~"commit|rollback",{SEL}}}[$__rate_interval]))', "{{node}}")], unit="ops",
@@ -138,7 +138,7 @@ def q(metric_rate, quant, by="le"):
 BV = 'ha_provider=~"$ha_provider",scenario=~"$scenario"'
 bench_vars = [var("ha_provider", "label_values(ha_transaction_total, ha_provider)", "HA provider"),
               var("scenario", 'label_values(ha_transaction_total{ha_provider=~"$ha_provider"}, scenario)', "Scenario")]
-node_vars = tvars("ha_lab_mysql_up")
+node_vars = tvars("ha_lab_db_up")
 STATE = {"mappings": [{"type": "value", "options": {"0": {"text": "no", "color": "red"}, "1": {"text": "yes", "color": "green"}}}],
          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": None}, {"color": "green", "value": 1}]}}
 NSEL = SEL
@@ -156,7 +156,7 @@ o.add("stat", "Current primary / writable nodes", [('ha_lab_writable == 1', "{{n
 o.add("timeseries", "Transaction latency (end-to-end, client)", [(q(f'ha_transaction_duration_seconds_bucket{{outcome="success",{BV}}}', x, "le"), f"p{int(x*100)}") for x in (0.5, 0.95, 0.99)], unit="s")
 o.add("timeseries", "Throughput", [(f"sum by (operation) (rate(ha_transaction_success_total{{{BV}}}[$__rate_interval]))", "{{operation}} ok"), (f"sum by (error_class) (rate(ha_transaction_errors_total{{{BV}}}[$__rate_interval]))", "error {{error_class}}")], unit="ops")
 o.row("Cluster")
-o.add("stat", "MySQL up", [("ha_lab_mysql_up", "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
+o.add("stat", "Database up", [("ha_lab_db_up", "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
 o.add("stat", "Healthy replicas / members", [("ha_lab_replica_io_running * ha_lab_replica_sql_running or ha_lab_group_member_online or ha_lab_wsrep_ready", "{{node}}")], w=8, h=4, extra={"fieldConfig": {"defaults": {"unit": "none", **STATE}, "overrides": []}})
 o.add("stat", "Max replication lag", [("max(replication_lag_seconds)", "lag")], unit="s", w=8, h=4)
 o.add("timeseries", "Replication lag", [("replication_lag_seconds", "{{node}} applier"), ("mysql_slave_status_seconds_behind_source or mysql_slave_status_seconds_behind_master", "{{node}} Seconds_Behind_Source")], unit="s")
@@ -213,14 +213,14 @@ r = D()
 NS2 = NSEL
 r.row("Topology")
 r.add("state-timeline", "Writable (primary) by node", [(f"ha_lab_writable{{{NS2}}}", "{{node}}")], w=12, h=6, extra={"fieldConfig": {"defaults": {"unit": "none", **STATE}, "overrides": []}})
-r.add("state-timeline", "MySQL up by node", [(f"ha_lab_mysql_up{{{NS2}}}", "{{node}}")], w=12, h=6, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
+r.add("state-timeline", "Database up by node", [(f"ha_lab_db_up{{{NS2}}}", "{{node}}")], w=12, h=6, extra={"fieldConfig": {"defaults": {"unit": "none", **UPMAP}, "overrides": []}})
 r.row("Asynchronous / semi-synchronous replication")
 r.add("timeseries", "Replication lag", [(f"replication_lag_seconds{{{NS2}}}", "{{node}} applier"), (f"mysql_slave_status_seconds_behind_source{{{NS2}}} or mysql_slave_status_seconds_behind_master{{{NS2}}}", "{{node}} Seconds_Behind_Source")], unit="s")
 r.add("timeseries", "Replica threads running", [(f"ha_lab_replica_io_running{{{NS2}}}", "{{node}} IO"), (f"ha_lab_replica_sql_running{{{NS2}}}", "{{node}} SQL")])
 r.add("timeseries", "Relay log backlog (transactions)", [(f'replication_queue_size{{queue="relay_log",{NS2}}}', "{{node}}")])
 r.add("timeseries", "Semi-sync acknowledgements / s", [(f"rate(mysql_global_status_rpl_semi_sync_source_yes_tx{{{NS2}}}[$__rate_interval])", "{{node}} acked"), (f"rate(mysql_global_status_rpl_semi_sync_source_no_tx{{{NS2}}}[$__rate_interval])", "{{node}} not acked (async fallback)")], unit="ops")
 r.add("timeseries", "Semi-sync status / avg wait", [(f"ha_lab_semi_sync_source_active{{{NS2}}}", "{{node}} active"), (f"mysql_global_status_rpl_semi_sync_source_tx_avg_wait_time{{{NS2}}} / 1e6", "{{node}} avg tx wait (s)")])
-r.add("timeseries", "GTID executed (convergence)", [(f"ha_lab_gtid_executed_transactions{{{NS2}}}", "{{node}}")], desc="Equal values on all nodes mean every node applied the same transactions.")
+r.add("timeseries", "Replication position (convergence)", [(f"ha_lab_replication_position{{{NS2}}}", "{{node}}")], desc="Equal values on all nodes mean every node applied the same transactions.")
 r.row("Group Replication (InnoDB Cluster)")
 r.add("timeseries", "Members by state", [(f"max by (state) (ha_lab_group_members{{{NS2}}})", "{{state}}")])
 r.add("timeseries", "Certification / applier queue", [(f'replication_queue_size{{queue=~"certification|applier",{NS2}}}', "{{node}} {{queue}}")])
@@ -231,7 +231,7 @@ r.add("timeseries", "Cluster size / primary component", [(f"ha_lab_wsrep_cluster
 r.add("timeseries", "Receive / send queue", [(f'replication_queue_size{{queue=~"wsrep_.*",{NS2}}}', "{{node}} {{queue}}")])
 r.add("timeseries", "Flow control paused (fraction)", [(f"mysql_global_status_wsrep_flow_control_paused{{{NS2}}}", "{{node}}")], unit="percentunit")
 r.add("timeseries", "Certification failures / s", [(f"rate(mysql_global_status_wsrep_local_cert_failures{{{NS2}}}[$__rate_interval])", "{{node}}")], unit="ops")
-r.save(f"{out}/replication-ha.json", "lab-replication-ha", "Replication & HA", ["replication"], "ha_lab_mysql_up")
+r.save(f"{out}/replication-ha.json", "lab-replication-ha", "Replication & HA", ["replication"], "ha_lab_db_up")
 
 # ---------------- 7. JMeter benchmark
 j = D()
@@ -254,8 +254,8 @@ f.add("state-timeline", "Writable node", [("ha_lab_writable", "{{node}}")], w=24
 f.add("timeseries", "Write availability (client)", [(f'sum(rate(ha_transaction_success_total{{operation="write",{BV}}}[15s])) / sum(rate(ha_transaction_total{{operation="write",{BV}}}[15s]))', "writes"), (f'sum(rate(ha_transaction_success_total{{operation="read",{BV}}}[15s])) / sum(rate(ha_transaction_total{{operation="read",{BV}}}[15s]))', "reads")], unit="percentunit")
 f.add("timeseries", "Client errors by class", [(f"sum by (error_class) (rate(ha_transaction_errors_total{{{BV}}}[15s]))", "{{error_class}}")], unit="ops")
 f.add("timeseries", "Successful writes / s", [(f'sum(rate(ha_transaction_success_total{{operation="write",{BV}}}[15s]))', "writes")], unit="ops")
-f.add("timeseries", "MySQL up", [("ha_lab_mysql_up", "{{node}}")])
-f.add("timeseries", "GTID executed (consistency / catch-up)", [("ha_lab_gtid_executed_transactions", "{{node}}")])
+f.add("timeseries", "Database up", [("ha_lab_db_up", "{{node}}")])
+f.add("timeseries", "Replication position (consistency / catch-up)", [("ha_lab_replication_position", "{{node}}")])
 f.add("timeseries", "Replication lag during recovery", [("replication_lag_seconds", "{{node}}")], unit="s")
 f.save(f"{out}/failover-recovery.json", "lab-failover", "Failover & Recovery", ["failover"], "", bench_vars)
 print("dashboards written to", out)

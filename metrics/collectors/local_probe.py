@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local (client machine) to node network probe exporter. Prometheus scrapes it on host.docker.internal.
 
-Usage: local_probe.py --targets local/prometheus/targets/mysqld.json --port 9465 --mysql-port 3306
+Usage: local_probe.py --targets local/prometheus/targets/db.json --port 9465 --mysql-port 3306
 """
 
 from __future__ import annotations

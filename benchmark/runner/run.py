@@ -114,7 +114,7 @@ class Poller(threading.Thread):
         self.state = {}
 
     def healthy(self, m):
-        if not m or m.get("ha_lab_mysql_up") != 1:
+        if not m or m.get("ha_lab_db_up") != 1:
             return False
         return (m.get("ha_lab_writable") == 1 or
                 (m.get("ha_lab_replica_io_running") == 1 and m.get("ha_lab_replica_sql_running") == 1) or
@@ -136,8 +136,8 @@ class Poller(threading.Thread):
                 if others:
                     self.events.add("new_primary_writable", t, node=others[0], all_writable=others)
                 if self.events.has("fault_restored") or self.events.has("new_primary_writable"):
-                    up = [mm for mm in snap.values() if mm and mm.get("ha_lab_mysql_up") == 1]
-                    counts = {mm.get("ha_lab_gtid_executed_transactions") for mm in up}
+                    up = [mm for mm in snap.values() if mm and mm.get("ha_lab_db_up") == 1]
+                    counts = {mm.get("ha_lab_replication_position") for mm in up}
                     if len(up) >= 2 and len(counts) == 1:
                         self.events.add("replication_converged", t, nodes=len(up))
                 if self.events.has("fault_restored") and all(self.healthy(mm) for mm in snap.values()):
@@ -148,8 +148,8 @@ class Poller(threading.Thread):
         return [n for n, m in self.state.items() if m and m.get("ha_lab_writable") == 1]
 
     def converged(self):
-        up = [m for m in self.state.values() if m and m.get("ha_lab_mysql_up") == 1]
-        return len({m.get("ha_lab_gtid_executed_transactions") for m in up}) <= 1
+        up = [m for m in self.state.values() if m and m.get("ha_lab_db_up") == 1]
+        return len({m.get("ha_lab_replication_position") for m in up}) <= 1
 
 
 def client_network(ctx, samples=10):

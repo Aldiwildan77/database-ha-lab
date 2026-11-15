@@ -13,7 +13,9 @@ Status: step 1 and part of step 2 are implemented (see "Implemented" below). Rol
 
 - Ports: each descriptor has a `ports` map (`default`, `standard`, `config` path in `ha.yml`, optional `span`) plus `primary_port` and `exporter_port`. The plugin keeps only the core ports (node_exporter, lab_collector, iperf). Port validation (range, distinct, span) runs over the descriptor's ports. `db_port` is the engine-neutral variable; `mysql_port` remains for the MySQL roles.
 
-Still hard-coded: `mysql_*` variable names, the collectors, JMeter, and the roles' location under `ansible/roles/`.
+- Metrics: the collector is split into `ha_lab_collector.py` (generic loader) and `engine_mysql.py`. The neutral names are `ha_lab_db_up` and `ha_lab_replication_position` (were `ha_lab_mysql_up` and `ha_lab_gtid_executed_transactions`). The Prometheus job is `db` (was `mysqld`). The descriptor names the exporter role, exporter name, up metric and collector module. MySQL-only recording rules moved to `rules/engine-mysql.yml`, and the availability alert is `DatabaseDown` on `ha_lab_db_up`. Renamed metrics break old dashboards and saved queries; the generated dashboards are updated.
+
+Still hard-coded: `mysql_*` variable names, the `lab-collector` role's credentials and socket path, the collectors, JMeter, and the roles' location under `ansible/roles/`.
 
 ## Planned engines
 

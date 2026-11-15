@@ -16,16 +16,17 @@ while read -r node addr; do
     red "  node_exporter   ${node} ${addr} unreachable"; fail=1
   fi
 done < <(lab_target_addresses node)
+exporter="$(lab_var db_exporter_name)"; up_metric="$(lab_var db_exporter_up_metric)"
 while read -r node addr; do
   body="$(curl -fsS --max-time 10 "http://${addr}/metrics" 2>/dev/null || true)"
-  if grep -q '^mysql_up 1' <<<"$body"; then
-    green "  mysqld_exporter ${node} ${addr} ok (mysql_up 1)"
+  if grep -q "^${up_metric} 1" <<<"$body"; then
+    green "  ${exporter} ${node} ${addr} ok (${up_metric} 1)"
   elif [[ -n "$body" ]]; then
-    red "  mysqld_exporter ${node} ${addr} reachable but mysql_up != 1"; fail=1
+    red "  ${exporter} ${node} ${addr} reachable but ${up_metric} != 1"; fail=1
   else
-    red "  mysqld_exporter ${node} ${addr} unreachable"; fail=1
+    red "  ${exporter} ${node} ${addr} unreachable"; fail=1
   fi
-done < <(lab_target_addresses mysqld)
+done < <(lab_target_addresses db)
 
 echo "== Prometheus targets (${prom})"
 if targets="$(curl -fsS --max-time 5 "${prom}/api/v1/targets?state=active" 2>/dev/null)"; then

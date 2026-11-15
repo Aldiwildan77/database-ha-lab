@@ -34,7 +34,7 @@
           {{ out | to_nice_json }}
       loop:
         - { job: node, port: "{{ node_exporter_port }}" }
-        - { job: mysqld, port: "{{ mysql_exporter_port }}" }
+        - { job: db, port: "{{ db_exporter_port }}" }
         - { job: halab, port: "{{ lab_collector_port }}" }
       loop_control:
         label: "{{ item.job }}"
