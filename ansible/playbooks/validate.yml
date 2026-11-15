@@ -6,6 +6,10 @@
   gather_facts: false
   tags: [local]
   tasks:
+    - name: Check local tools (controller, monitoring, JMeter)
+      ansible.builtin.import_tasks: ../tasks/preflight-local-tools.yml
+      tags: [tools]
+
     - name: Load secrets
       ansible.builtin.import_tasks: ../tasks/load-secrets.yml
 

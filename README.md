@@ -29,7 +29,7 @@ A lab for deploying, monitoring, benchmarking and comparing MySQL high-availabil
 
 ## Requirements
 
-**On your machine**
+**On your machine** (any OS; `make validate-local` checks the tools, not the OS)
 - Ansible core 2.17 or later (tested with 2.21)
 - Docker with Compose v2
 - Tailscale, connected to the same tailnet as the nodes
@@ -52,7 +52,7 @@ $EDITOR config/inventory.yml config/ha.yml config/secrets.yml
 ansible-vault encrypt config/secrets.yml
 export ANSIBLE_VAULT_PASSWORD_FILE=~/.lab-vault-pass   # or: make <target> VAULT_ARGS=--ask-vault-pass
 
-make validate             # config, secrets, local Tailscale, DNS, tailscale ping, SSH, sudo, OS
+make validate             # local tools, config, secrets, Tailscale, DNS, tailscale ping, SSH, sudo, node OS
 make provision            # chrony, ufw, MySQL (or PXC), accounts, exporters, lab collector, network probe
 make monitoring           # targets, Prometheus + Grafana, local client probe
 make metrics-check        # promtool, direct exporter checks, Prometheus target health
@@ -112,7 +112,7 @@ nodes:
 ## Commands
 
 ```text
-Configuration   make init | deps | validate | validate-config
+Configuration   make init | deps | validate | validate-local | validate-config
 Infrastructure  make provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
 Network         make network-check | network-matrix [IPERF=1]

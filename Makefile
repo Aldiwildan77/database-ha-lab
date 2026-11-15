@@ -14,7 +14,7 @@ CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
-.PHONY: help init deps validate validate-config provision configure-exporters collect-info \
+.PHONY: help init deps validate validate-local validate-config provision configure-exporters collect-info \
         targets monitoring monitoring-stop monitoring-status metrics-check network-check network-matrix \
         probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
         dashboards benchmark failover report status destroy lint
@@ -36,7 +36,10 @@ deps: ## Install pinned Ansible collections into ansible/collections
 validate-config: ## Validate config files only (offline)
 	@ansible-inventory --graph >/dev/null && echo "configuration OK" && ansible-inventory --graph
 
-validate: validate-config ## Validate config, secrets, Tailscale, DNS, SSH, OS
+validate-local: validate-config ## Check this machine's tools (Ansible, Python, Docker Compose, Java, Tailscale...)
+	$(ansible) ansible/playbooks/validate.yml --tags tools
+
+validate: validate-config ## Validate local tools, config, secrets, Tailscale, DNS, SSH, node OS
 	$(ansible) ansible/playbooks/validate.yml
 
 # ---------------------------------------------------------------- Infrastructure

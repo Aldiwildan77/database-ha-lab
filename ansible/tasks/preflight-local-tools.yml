@@ -1,0 +1,113 @@
+---
+# Runs on localhost. Checks the tools this machine needs as Ansible controller, monitoring host and
+# JMeter runner. The OS is not checked; any OS that provides these tools works.
+- name: Probe local tools
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - |
+        import json, os, re, shutil, subprocess, sys
+
+        root = sys.argv[1]
+        env = {**os.environ, "ANSIBLE_CONFIG": os.path.join(root, "ansible.cfg")}
+
+        def run(*cmd):
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=root, env=env)
+                return p.returncode, (p.stdout + p.stderr).strip()
+            except (OSError, subprocess.TimeoutExpired) as e:
+                return 127, str(e)
+
+        def ver(text, pattern=r"(\d+)\.(\d+)(?:\.(\d+))?"):
+            m = re.search(pattern, text or "")
+            return [int(x or 0) for x in m.groups()] if m else None
+
+        out = {}
+        for tool in ("python3", "tailscale", "curl", "openssl", "nc", "ping", "docker", "java", "make"):
+            out[tool] = {"path": shutil.which(tool), "version": None, "compose_version": None,
+                         "daemon": False, "major": None}
+        if out["python3"]["path"]:
+            out["python3"]["version"] = ver(run("python3", "--version")[1])
+        if out["docker"]["path"]:
+            rc, txt = run("docker", "compose", "version", "--short")
+            out["docker"]["compose_version"] = ver(txt) if rc == 0 else None
+            out["docker"]["daemon"] = run("docker", "info", "--format", "{" + "{.ServerVersion}" + "}")[0] == 0
+        if out["java"]["path"]:
+            rc, txt = run("java", "-version")
+            m = re.search(r'version "(\d+)(?:\.(\d+))?', txt)
+            major = int(m.group(1)) if m else None
+            if major == 1 and m.group(2):
+                major = int(m.group(2))
+            out["java"]["major"] = major
+        cols = {}
+        for c in ("ansible.mysql", "community.general", "ansible.posix"):
+            rc, txt = run("ansible-galaxy", "collection", "list", c, "--format", "json")
+            cols[c] = rc == 0 and c in txt
+        out["collections"] = cols
+        print(json.dumps(out))
+      - "{{ playbook_dir | dirname | dirname }}"
+  register: tools_probe
+  changed_when: false
+
+- name: Check JMeter installation
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ playbook_dir }}/../../local/tools/jmeter/bin/jmeter"
+  register: tools_paths
+
+- name: Evaluate local tools
+  ansible.builtin.set_fact:
+    tools_problems: >-
+      {%- set t = tools_probe.stdout | from_json -%}
+      {%- set need_monitoring = monitoring_enabled | bool -%}
+      {%- set need_benchmark = (lab_ha.benchmark | default({})).enabled | default(true) | bool -%}
+      {%- set p = [] -%}
+      {%- if ansible_version.full is version('2.17', '<') -%}
+      {%- set _ = p.append('ansible-core ' ~ ansible_version.full ~ ' is too old (need >= 2.17)') -%}
+      {%- endif -%}
+      {%- set missing = t.collections | dict2items | rejectattr('value') | map(attribute='key') | list -%}
+      {%- if missing -%}
+      {%- set _ = p.append('Ansible collections missing (' ~ missing | join(', ') ~ '): run make deps') -%}
+      {%- endif -%}
+      {%- for tool in ['python3', 'tailscale', 'curl', 'openssl', 'nc', 'ping', 'make'] -%}
+      {%- if not t[tool].path -%}{%- set _ = p.append(tool ~ ' not found in PATH') -%}{%- endif -%}
+      {%- endfor -%}
+      {%- if t.python3.version and t.python3.version[:2] < [3, 9] -%}
+      {%- set _ = p.append('python3 ' ~ t.python3.version | join('.') ~ ' is too old (need >= 3.9)') -%}
+      {%- endif -%}
+      {%- if need_monitoring -%}
+      {%- if not t.docker.path -%}{%- set _ = p.append('docker not found (needed for local Prometheus/Grafana)') -%}
+      {%- elif not t.docker.compose_version or t.docker.compose_version[0] < 2 -%}
+      {%- set _ = p.append('Docker Compose v2 not found (docker compose version)') -%}
+      {%- elif not t.docker.daemon -%}{%- set _ = p.append('Docker daemon is not reachable (start Docker)') -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- if need_benchmark -%}
+      {%- if not t.java.path -%}{%- set _ = p.append('java not found (JMeter needs Java 8+)') -%}
+      {%- elif not t.java.major or t.java.major < 8 -%}
+      {%- set _ = p.append('java ' ~ t.java.major ~ ' is too old (JMeter needs Java 8+)') -%}
+      {%- endif -%}
+      {%- endif -%}
+      {{ p }}
+    tools_warnings: >-
+      {{ ['JMeter not installed yet: run make jmeter-install']
+         if ((lab_ha.benchmark | default({})).enabled | default(true) | bool) and not tools_paths.results[0].stat.exists
+         else [] }}
+
+- name: Show local tool summary
+  ansible.builtin.debug:
+    msg: >-
+      ansible-core {{ ansible_version.full }};
+      {% set t = tools_probe.stdout | from_json %}python3 {{ (t.python3.version or ['?']) | join('.') }};
+      docker compose {{ (t.docker.compose_version or ['missing']) | join('.') }};
+      java {{ t.java.major | default('missing', true) }};
+      jmeter {{ 'installed' if tools_paths.results[0].stat.exists else 'missing' }}
+      {{ ('| WARNING: ' ~ tools_warnings | join('; ')) if tools_warnings else '' }}
+
+- name: Assert local tools
+  ansible.builtin.assert:
+    that: tools_problems | length == 0
+    fail_msg: "Local machine is missing tools: {{ tools_problems | join('; ') }}"
+    quiet: true
