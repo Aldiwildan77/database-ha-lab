@@ -172,6 +172,7 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_mixed_networks": len(used) > 1,
             "lab_unencrypted_networks": sorted(n for n in used if not networks[n]["encrypted"]),
             "lab_allowed_sources": client_cidrs,
+            "lab_ha_min_nodes": HA_PROVIDERS[provider][0],
             "lab_mesh_tcp_ports": mesh_ports,
             "lab_mesh_udp_ports": [4567] if provider == "percona-xtradb-cluster" else [],
             "lab_client_tcp_ports": client_ports,
@@ -375,7 +376,8 @@ class InventoryModule(BaseInventoryPlugin):
             lo, hi = HA_PROVIDERS[provider]
             n = len(nodes)
             if n < lo:
-                errors.append(f"ha.yml: {provider} needs at least {lo} nodes, inventory has {n}")
+                warnings.append(f"{provider} needs at least {lo} nodes, inventory has {n}: provisioning, monitoring "
+                                f"and direct benchmarks work, make ha will refuse")
             if hi and n > hi:
                 errors.append(f"ha.yml: {provider} supports at most {hi} nodes, inventory has {n}")
             primaries = [x.get("name") for x in nodes if isinstance(x, dict) and x.get("role") == "primary"]

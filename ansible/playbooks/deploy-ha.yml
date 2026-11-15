@@ -8,6 +8,13 @@
     - name: Load secrets
       ansible.builtin.import_tasks: ../tasks/load-secrets.yml
   tasks:
+    - name: Require enough nodes for the provider
+      ansible.builtin.assert:
+        that: groups['mysql_nodes'] | length >= lab_ha_min_nodes | int
+        fail_msg: "{{ ha_provider }} needs at least {{ lab_ha_min_nodes }} nodes; inventory has {{ groups['mysql_nodes'] | length }}."
+        quiet: true
+      run_once: true
+
     - name: Read deployed provider marker
       ansible.builtin.slurp:
         src: /etc/mysql/.ha-lab-provider
