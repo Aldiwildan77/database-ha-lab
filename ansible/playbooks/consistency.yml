@@ -1,0 +1,38 @@
+---
+# Dumps the benchmark ledger for one run from every reachable node: -e run_id=<id> -e out_dir=<dir>
+- name: Dump ledger
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  vars:
+    db: "{{ lab_benchmark.database | default('halab') }}"
+  tasks:
+    - name: Export txn_ids for the run
+      ansible.builtin.shell: |
+        set -o pipefail
+        mysql -N -B -e "SELECT txn_id FROM \`{{ db }}\`.ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > /tmp/halab-ledger.txt
+        mysql -N -B -e "SELECT @@gtid_executed; SELECT COUNT(*), COALESCE(SUM(balance), 0) FROM \`{{ db }}\`.accounts" | tr '\t\n' '  '
+      args:
+        executable: /bin/bash
+      register: cs_dump
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+
+    - name: Fetch ledger
+      ansible.builtin.fetch:
+        src: /tmp/halab-ledger.txt
+        dest: "{{ out_dir }}/ledger-{{ inventory_hostname }}.txt"
+        flat: true
+      when: cs_dump.rc | default(1) == 0
+
+    - name: Write node summary
+      ansible.builtin.copy:
+        dest: "{{ out_dir }}/ledger-{{ inventory_hostname }}.json"
+        content: >-
+          {{ {'node': inventory_hostname, 'reachable': cs_dump.rc | default(1) == 0,
+              'error': cs_dump.stderr | default(cs_dump.msg | default('')),
+              'summary': cs_dump.stdout | default('')} | to_nice_json }}
+        mode: "0644"
+      delegate_to: localhost
+      become: false

@@ -1,13 +1,27 @@
 ---
-# Used from Phase 6 (JMeter).
-client_location: local
-endpoint: primary   # primary | <node name> | ha
+client_location: local          # label recorded in every report, e.g. local-japan
+endpoint: ha                    # ha | primary | <node name>  (ha = provider endpoint; others = direct-to-node)
 database: halab
+
 dataset:
-  rows: 100000
+  rows: 100000                  # accounts table size; same rows + seed => identical data
   seed: 42
-load:
+
+load:                           # defaults for every scenario (JMeter properties)
   threads: 16
   ramp_up_seconds: 30
   duration_seconds: 300
-  read_ratio: 0.5
+  reads_per_txn: 5
+  think_ms: 0
+  connect_timeout_ms: 3000
+  socket_timeout_ms: 15000
+  reconnect_backoff_ms: 100
+
+scenarios:                      # per-scenario overrides; read_ratio defaults live in the .jmx files
+  baseline: {threads: 2, duration_seconds: 120}
+  spike-test: {spike_threads: 64, spike_at_seconds: 120, spike_duration_seconds: 60}
+  soak-test: {duration_seconds: 3600}
+  failover-test: {threads: 8, duration_seconds: 300}
+
+failover:
+  manual_promotion_delay_seconds: 10   # async/semi-sync: operator reaction time simulated before make promote

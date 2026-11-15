@@ -15,12 +15,14 @@ CONFIG_FILES := inventory ha monitoring benchmark
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
 .PHONY: help init deps validate validate-config provision configure-exporters collect-info \
-        targets monitoring monitoring-stop monitoring-status metrics-check \
-        network-check network-matrix ha benchmark failover report status destroy lint
+        targets monitoring monitoring-stop monitoring-status metrics-check network-check network-matrix \
+        probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
+        dashboards benchmark failover report status destroy lint
 
 help: ## Show targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# ---------------------------------------------------------------- Configuration
 init: ## Create config/*.yml from the examples (never overwrites)
 	@for f in $(CONFIG_FILES) secrets; do \
 	  if [ -f config/$$f.yml ]; then echo "config/$$f.yml exists, kept"; \
@@ -37,15 +39,17 @@ validate-config: ## Validate config files only (offline)
 validate: validate-config ## Validate config, secrets, Tailscale, DNS, SSH, OS
 	$(ansible) ansible/playbooks/validate.yml
 
-provision: validate-config ## Install MySQL + exporters on all nodes
+# ---------------------------------------------------------------- Infrastructure
+provision: validate-config ## Install MySQL (or PXC) + exporters + collectors on all nodes
 	$(ansible) ansible/playbooks/provision.yml
 
-configure-exporters: validate-config ## (Re)install exporters only
+configure-exporters: validate-config ## (Re)install exporters and lab collectors only
 	$(ansible) ansible/playbooks/configure-exporters.yml
 
 collect-info: validate-config ## Gather node specs into local/state/node-info.json
 	$(ansible) ansible/playbooks/collect-info.yml
 
+# ---------------------------------------------------------------- Monitoring
 targets: validate-config ## Generate Prometheus targets from the inventory
 	local/scripts/generate-targets.sh $(ARGS)
 
@@ -53,11 +57,13 @@ local/compose/.env:
 	@umask 077; printf 'GRAFANA_ADMIN_PASSWORD=%s\nPROMETHEUS_RETENTION=30d\n' "$$(openssl rand -base64 24 | tr -d '/+=')" > $@
 	@echo "Generated $@ (Grafana admin password inside)"
 
-monitoring: local/compose/.env targets ## Start local Prometheus + Grafana
+monitoring: local/compose/.env targets ## Start local Prometheus + Grafana + client probe
 	$(COMPOSE) up -d
+	@local/scripts/probes.sh start
 	@echo "Prometheus: http://127.0.0.1:9090   Grafana: http://127.0.0.1:3000 (admin / see local/compose/.env)"
 
-monitoring-stop: ## Stop local Prometheus + Grafana (data volumes kept)
+monitoring-stop: ## Stop local Prometheus + Grafana + probe (data volumes kept)
+	@local/scripts/probes.sh stop
 	$(COMPOSE) down
 
 monitoring-status: local/compose/.env ## Show monitoring containers
@@ -67,42 +73,88 @@ metrics-check: local/compose/.env ## Validate Prometheus config and check export
 	$(COMPOSE) run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
 	local/scripts/health-check.sh
 
+probes-start: ## Start the local client-to-node probe exporter (:9465)
+	@local/scripts/probes.sh start
+
+probes-stop: ## Stop the local probe exporter
+	@local/scripts/probes.sh stop
+
+# ---------------------------------------------------------------- Network
 network-check: validate-config ## Local-to-node DNS, tailscale ping and port checks
 	local/scripts/check-connectivity.sh
 
-network-matrix: ## Node-to-node RTT matrix (Phase 5)
-	local/scripts/network-matrix.sh
+network-matrix: validate-config ## Node-to-node RTT/loss/path matrix (IPERF=1 adds throughput)
+	$(ansible) ansible/playbooks/network-matrix.yml $(if $(IPERF),-e iperf=true)
 
+# ---------------------------------------------------------------- HA
 ha: validate-config ## Deploy HA topology: make ha HA=<provider>
 	@[ -n "$(HA)" ] || { echo "usage: make ha HA=<$(HA_PROVIDERS)>"; exit 1; }
 	@echo " $(HA_PROVIDERS) " | grep -q " $(HA) " || { echo "unknown HA provider '$(HA)'. Valid: $(HA_PROVIDERS)"; exit 1; }
 	@cfg="$$(local/scripts/lab-var.sh ha_provider)"; \
-	  [ "$$cfg" = "$(HA)" ] || { echo "HA=$(HA) differs from config/ha.yml ha_provider=$$cfg. Switching topologies needs an explicit cleanup (make destroy) and a config change."; exit 1; }
-	@echo "HA deployment for $(HA) is not implemented yet (async-replication is next, Phase 4)."; exit 2
+	  [ "$$cfg" = "$(HA)" ] || { echo "HA=$(HA) differs from config/ha.yml ha_provider=$$cfg. Switching topologies needs make destroy and a config change."; exit 1; }
+	$(ansible) ansible/playbooks/deploy-ha.yml
 
-benchmark: ## Run a JMeter scenario: make benchmark SCENARIO=<name>
+topology: validate-config ## Show topology and health
+	$(ansible) ansible/playbooks/topology.yml
+
+switchover: validate-config ## Planned primary change: make switchover [NEW_PRIMARY=<node>]
+	$(ansible) ansible/playbooks/failover.yml -e failover_mode=switchover $(if $(NEW_PRIMARY),-e new_primary=$(NEW_PRIMARY))
+
+promote: validate-config ## Unplanned failover after primary loss: make promote [NEW_PRIMARY=<node>] [FORCE=1]
+	$(ansible) ansible/playbooks/failover.yml -e failover_mode=failover $(if $(NEW_PRIMARY),-e new_primary=$(NEW_PRIMARY)) $(if $(FORCE),-e force=true)
+
+recover: validate-config ## Bring a failed node back: make recover NODE=<node>
+	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node>"; exit 1; }
+	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE)
+
+fault: validate-config ## make fault NODE=<n> FAULT=<stop-mysql|kill-mysql|isolate|netem> [ACTION=restore] CONFIRM=yes
+	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }
+	@[ -n "$(NODE)" ] && [ -n "$(FAULT)" ] || { echo "usage: make fault NODE=<node> FAULT=<type> [ACTION=inject|restore] CONFIRM=yes"; exit 1; }
+	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(NETEM),-e '{"netem": "$(NETEM)"}')
+
+# ---------------------------------------------------------------- Benchmark
+jmeter-install: ## Install JMeter 5.6.3 + Connector/J into local/tools
+	jmeter/install.sh
+
+scenarios: ## Regenerate jmeter/scenarios/*.jmx
+	python3 -I jmeter/build-scenarios.py
+
+dashboards: ## Regenerate local/grafana/dashboards/*.json
+	python3 -I local/grafana/build-dashboards.py
+
+benchmark: validate-config ## make benchmark SCENARIO=<name> [ENDPOINT=ha|primary|<node>] [J="threads=32 duration=600"] [FAULT=.. CONFIRM=yes]
 	@[ -n "$(SCENARIO)" ] || { echo "usage: make benchmark SCENARIO=<$(SCENARIOS)>"; exit 1; }
 	@echo " $(SCENARIOS) " | grep -q " $(SCENARIO) " || { echo "unknown scenario '$(SCENARIO)'. Valid: $(SCENARIOS)"; exit 1; }
-	@echo "Benchmarking is not implemented yet (Phase 6)."; exit 2
+	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario $(SCENARIO) \
+	  $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(foreach p,$(J),-J $(p)) \
+	  $(if $(FAULT),--fault $(FAULT)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(RUN_ARGS)
 
-failover: ## Controlled failover experiment (Phase 4+)
-	@echo "Failover experiments are not implemented yet (Phase 4)."; exit 2
+failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-mysql|kill-mysql|isolate]
+	@[ "$(CONFIRM)" = yes ] || { echo "The failover experiment stops the primary. Add CONFIRM=yes."; exit 1; }
+	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario failover-test \
+	  --fault $(or $(FAULT),stop-mysql) --confirm yes --endpoint $(or $(ENDPOINT),ha) $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
 
-report: ## Generate benchmark report (Phase 8)
-	@echo "Reporting is not implemented yet (Phase 8)."; exit 2
+report: ## Rebuild a report: make report [RUN=<run_id>] (default: latest)
+	@run="$(or $(RUN),$$(ls -1d benchmark/results/run-* 2>/dev/null | sort | tail -1 | xargs -n1 basename))"; \
+	  [ -n "$$run" ] || { echo "no runs in benchmark/results"; exit 1; }; \
+	  python3 -I benchmark/report/report.py benchmark/results/$$run && echo "benchmark/results/$$run/report.md"
 
-status: validate-config ## Inventory, monitoring and exporter health
+# ---------------------------------------------------------------- Status / teardown
+status: validate-config ## Inventory, monitoring, exporter health and topology
 	@ansible-inventory --graph
 	@$(MAKE) --no-print-directory monitoring-status || true
 	@local/scripts/health-check.sh || true
+	@$(ansible) ansible/playbooks/topology.yml || true
 
-destroy: ## Remove the HA topology (Phase 4; requires confirmation)
-	@echo "This will remove HA configuration from all nodes. Type the environment name to confirm:"; \
-	  read -r answer; env="$$(local/scripts/lab-var.sh lab_environment)"; \
+destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=1 also purges MySQL and data)
+	@env="$$(local/scripts/lab-var.sh lab_environment)"; prov="$$(local/scripts/lab-var.sh ha_provider)"; \
+	  echo "This removes the $$prov topology from all nodes$(if $(DATA), AND DELETES ALL MYSQL DATA AND PACKAGES)."; \
+	  printf "Type the environment name (%s) to confirm: " "$$env"; read -r answer; \
 	  [ -n "$$env" ] && [ "$$answer" = "$$env" ] || { echo "aborted"; exit 1; }; \
-	  echo "destroy-ha is not implemented yet (Phase 4). Nothing was changed."; exit 2
+	  $(ansible) ansible/playbooks/destroy-ha.yml -e confirm=$$env $(if $(DATA),-e destroy_data=true)
 
-lint: ## ansible-lint, shellcheck, compose config
+lint: ## ansible-lint, shellcheck, compose config, python compile
 	ansible-lint ansible/
-	shellcheck -x -e SC1091 local/scripts/*.sh
+	shellcheck -x -e SC1091 local/scripts/*.sh jmeter/install.sh
 	$(COMPOSE) config -q
+	python3 -I -m py_compile metrics/collectors/*.py benchmark/*/*.py jmeter/build-scenarios.py local/grafana/build-dashboards.py

@@ -1,0 +1,113 @@
+---
+# Collects everything a benchmark run needs: -e out=<run_dir>
+# Writes <run_dir>/context.json (no secrets) and <run_dir>/secret.properties (0600, JMeter credentials).
+- name: Node state for the run
+  hosts: mysql_nodes
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Read topology
+      ansible.builtin.import_tasks: ../tasks/topology-facts.yml
+
+    - name: Read clock state
+      ansible.builtin.command: chronyc -c tracking
+      register: ctx_chrony
+      changed_when: false
+      failed_when: false
+
+    - name: Read MySQL version
+      ansible.mysql.mysql_info:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        filter: [version]
+      register: ctx_mysql
+      failed_when: false
+
+    - name: Build node record
+      ansible.builtin.set_fact:
+        ctx_node:
+          name: "{{ inventory_hostname }}"
+          fqdn: "{{ node_fqdn }}"
+          datacenter: "{{ node_datacenter }}"
+          configured_role: "{{ node_role }}"
+          writable: "{{ lab_topo.mysql_up and not lab_topo.read_only }}"
+          mysql_up: "{{ lab_topo.mysql_up }}"
+          mysql_version: "{{ ctx_mysql.version.full | default('unknown') }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          vcpus: "{{ ansible_processor_vcpus }}"
+          cpu_model: "{{ ansible_processor[2] | default(ansible_processor | last) }}"
+          memory_mb: "{{ ansible_memtotal_mb }}"
+          disks: "{{ ansible_devices | dict2items | rejectattr('key', 'match', '^(loop|ram|sr|dm-)')
+                     | map(attribute='key') | list }}"
+          virtualization: "{{ ansible_virtualization_type | default('') }}/{{ ansible_virtualization_role | default('') }}"
+          clock_synced: "{{ (ctx_chrony.stdout.split(','))[13] | default('') | trim == 'Normal' }}"
+          clock_offset_seconds: "{{ ((ctx_chrony.stdout.split(','))[4] | default('nan')) | float }}"
+          clock_root_dispersion_seconds: "{{ ((ctx_chrony.stdout.split(','))[11] | default('nan')) | float }}"
+
+- name: Write run context
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    bench: "{{ lab_benchmark | default({}) }}"
+    endpoint: "{{ endpoint_override | default(bench.endpoint | default('ha')) }}"
+    router: "{{ (lab_ha.innodb_cluster | default({})).router | default({}) }}"
+  tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+
+    - name: Resolve node addresses
+      ansible.builtin.import_tasks: ../tasks/resolve-node-addresses.yml
+
+    - name: Require benchmark password
+      ansible.builtin.assert:
+        that: mysql_benchmark_password | length >= 16
+        fail_msg: Set mysql_benchmark_password (>= 16 chars) and re-run make provision to create the bench account.
+        quiet: true
+      no_log: true
+
+    - name: Choose endpoints
+      ansible.builtin.set_fact:
+        ctx_nodes: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'ctx_node') | list }}"
+        ctx_writable: >-
+          {{ groups['mysql_nodes'] | map('extract', hostvars, 'ctx_node') | selectattr('writable') | map(attribute='name') | list }}
+
+    - name: Build endpoint list
+      ansible.builtin.set_fact:
+        ctx_endpoint: >-
+          {%- set hp = {} -%}
+          {%- for n in groups['mysql_nodes'] -%}
+          {%- set a = lab_node_addresses[n] -%}
+          {%- set _ = hp.update({n: ('[' ~ a ~ ']') if ':' in a else a}) -%}
+          {%- endfor -%}
+          {%- if endpoint == 'ha' and ha_provider == 'innodb-cluster' and router.enabled | default(true) -%}
+          {{ {'type': 'ha', 'mode': 'first-available', 'target': 'mysql-router',
+              'endpoints': groups['mysql_nodes'] | map('extract', hp) | map('regex_replace', '$', ':' ~ (router.rw_port | default(6446))) | list} }}
+          {%- elif endpoint == 'ha' -%}
+          {{ {'type': 'ha', 'mode': 'writable', 'target': 'topology-aware-client',
+              'endpoints': groups['mysql_nodes'] | map('extract', hp) | map('regex_replace', '$', ':' ~ mysql_port) | list} }}
+          {%- else -%}
+          {%- set target = (ctx_writable | first | default(groups['role_primary'][0])) if endpoint == 'primary' else endpoint -%}
+          {{ {'type': 'direct', 'mode': 'single', 'target': target, 'endpoints': [hp[target] ~ ':' ~ mysql_port]} }}
+          {%- endif -%}
+
+    - name: Write context.json
+      ansible.builtin.copy:
+        dest: "{{ out }}/context.json"
+        mode: "0644"
+        content: >-
+          {{ {'environment': lab_environment, 'ha_provider': ha_provider, 'mysql_version_config': mysql_version,
+              'mysql_port': mysql_port, 'collector_port': lab_collector_port, 'database': bench.database | default('halab'),
+              'client_location': bench.client_location | default('local'),
+              'endpoint': ctx_endpoint, 'writable_nodes': ctx_writable, 'nodes': ctx_nodes,
+              'addresses': lab_node_addresses, 'benchmark_config': bench,
+              'collected_at': now(utc=true).isoformat()} | to_nice_json }}
+
+    - name: Write JMeter credentials
+      ansible.builtin.copy:
+        dest: "{{ out }}/secret.properties"
+        mode: "0600"
+        content: |
+          db_user=bench
+          db_password={{ mysql_benchmark_password }}
+      no_log: true

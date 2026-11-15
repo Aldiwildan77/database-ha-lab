@@ -23,7 +23,7 @@
 ## Known limitations
 
 - MySQL from repo.mysql.com is amd64-only; arm64 nodes are rejected.
-- Percona XtraDB Cluster uses different server packages; provisioning refuses `ha_provider: percona-xtradb-cluster` until Phase 7.
+- Percona XtraDB Cluster uses different server packages. Choose `ha_provider` before provisioning; switching to or from PXC needs `make destroy DATA=1`.
 - `my.cnf` changes restart mysqld through a handler. On a running cluster this causes a failover; use `ARGS="--limit <node>"` to roll changes one node at a time.
 - `innodb_buffer_pool_size` defaults to 50% of RAM; override for small nodes.
 - Disk latency on the Host dashboard is a derived mean from `/proc/diskstats`, not a distribution. Histograms arrive with Phase 5 collectors.
@@ -41,3 +41,7 @@
 | Prometheus | v3.15.1 |
 | Grafana | 12.4.12 |
 | Ansible collections | community.general 14.0.1, ansible.mysql 5.2.1, ansible.posix 2.2.2 |
+| JMeter / Connector/J | 5.6.3 / 26.10.0 (Java 8+) |
+| Orchestrator | percona-orchestrator 3.2.6 (Percona pdps-84-lts / pdps-80) |
+| Percona XtraDB Cluster | 8.4 LTS / 8.0 |
+| MySQL accounts | `caching_sha2_password` (8.4 does not load `mysql_native_password`) |
