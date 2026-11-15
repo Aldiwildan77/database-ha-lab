@@ -1,0 +1,5 @@
+---
+# MariaDB hook for failover.yml (managed failover). No MariaDB strategy with an HA manager is implemented yet.
+- name: Refuse managed switchover
+  ansible.builtin.fail:
+    msg: "{{ ha_provider }} has no managed switchover for MariaDB yet."

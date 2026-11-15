@@ -1,0 +1,19 @@
+---
+# PostgreSQL hook for the provisioning summary: sets lab_db_summary (shown as-is).
+- name: Read PostgreSQL status
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT current_setting('server_version') AS version, current_setting('cluster_name') AS cluster,
+             current_setting('port') AS port, current_setting('wal_level') AS wal_level,
+             current_setting('data_checksums') AS data_checksums, current_setting('ssl') AS ssl,
+             pg_is_in_recovery() AS in_recovery
+  register: summary_postgres
+  changed_when: false
+
+- name: Set summary
+  ansible.builtin.set_fact:
+    lab_db_summary: "{{ summary_postgres.query_result[0] }}"

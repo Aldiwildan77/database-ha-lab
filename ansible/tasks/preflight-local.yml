@@ -23,7 +23,7 @@
     host: "{{ lab_node_addresses[item] }}"
     port: "{{ hostvars[item].ansible_port | default(22) }}"
     timeout: 8
-  loop: "{{ groups['mysql_nodes'] }}"
+  loop: "{{ groups['db_nodes'] }}"
   register: lab_reach
   failed_when: false
 
@@ -42,7 +42,7 @@
 - name: Tailscale ping nodes on tailscale networks
   ansible.builtin.command:
     argv: [tailscale, ping, --c, "3", --timeout, 5s, "{{ hostvars[item].node_address }}"]
-  loop: "{{ groups['mysql_nodes'] | map('extract', hostvars) | selectattr('node_network_type', 'equalto', 'tailscale')
+  loop: "{{ groups['db_nodes'] | map('extract', hostvars) | selectattr('node_network_type', 'equalto', 'tailscale')
             | map(attribute='inventory_hostname') | list }}"
   register: lab_ts_ping
   changed_when: false
@@ -63,4 +63,4 @@
       {{ item }} ({{ hostvars[item].node_network }}/{{ hostvars[item].node_network_type }}):
       {{ (lab_ts_ping.results | selectattr('item', 'equalto', item) | map(attribute='stdout_lines') | first | default([])
           | select('search', 'pong') | list | last) | default('reachable at ' ~ lab_node_addresses[item]) }}
-  loop: "{{ groups['mysql_nodes'] }}"
+  loop: "{{ groups['db_nodes'] }}"

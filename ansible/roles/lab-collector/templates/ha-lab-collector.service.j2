@@ -1,10 +1,10 @@
 [Unit]
-Description=mysql-ha-lab node collector
-After=network-online.target mysql.service
+Description=ha-lab node collector ({{ db_engine }})
+After=network-online.target {{ lab_engine.collector.after }}
 
 [Service]
-User=mysqld_exporter
-Group=mysqld_exporter
+User={{ lab_engine.collector.run_as }}
+Group={{ lab_engine.collector.run_as }}
 ExecStart=/usr/bin/python3 {{ lab_collector_dir }}/ha_lab_collector.py
 Restart=always
 RestartSec=2

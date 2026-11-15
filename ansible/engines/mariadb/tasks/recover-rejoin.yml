@@ -1,0 +1,11 @@
+---
+# MariaDB hook for recover.yml. Rejoins `node` to the topology led by rc_primary.
+- name: Rejoin as replica
+  ansible.builtin.include_role:
+    name: mariadb-replication
+  vars:
+    replication_primary: "{{ rc_primary }}"
+  when:
+    - lab_ha_strategy.family == 'replication'
+    - inventory_hostname == node
+    - rc_primary != ''

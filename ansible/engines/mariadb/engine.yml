@@ -1,0 +1,94 @@
+---
+# MariaDB engine descriptor. A strategy with status: planned is defined here, but its roles do not exist
+# yet, so selecting it is refused at validate time.
+name: mariadb
+display: MariaDB
+status: ready
+config_section: mariadb
+versions: ["10.11", "11.4", "11.8"]
+default_version: "11.4"
+service: mariadb
+process_names: [mariadbd]
+helper_processes: [node_exporter, mysqld_exporter, python3, maxscale]
+marker_dir: /etc/mysql
+config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
+paths_written:
+  - /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
+  - /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+  - /etc/ha-lab
+  - /etc/halab
+  - /opt/ha-lab
+  - /opt/node_exporter-*
+  - /opt/mysqld_exporter-*
+  - /var/lib/node_exporter/textfile
+primary_port: mariadb
+exporter_port: mariadb_exporter
+exporter:
+  role: mysql-exporter           # mysqld_exporter also speaks to MariaDB
+  name: mysqld_exporter
+  up_metric: mysql_up
+collector:
+  module: engine_mariadb
+  run_as: mysqld_exporter
+  after: mariadb.service
+  connect: {user: exporter, socket: /run/mysqld/mysqld.sock}
+ansible_collections: [ansible.mysql]
+ports:
+  mariadb: {default: 13306, standard: 3306, config: mariadb.port}
+  mariadb_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
+  galera_gcomm: {default: 14567, standard: 4567, config: mariadb_galera.gcomm_port}
+  galera_ist: {default: 14568, standard: 4568, config: mariadb_galera.ist_port}
+  galera_sst: {default: 14444, standard: 4444, config: mariadb_galera.sst_port}
+  maxscale_rw: {default: 14006, standard: 4006, config: maxscale.rw_port}
+  maxscale_admin: {default: 18989, standard: 8989, config: maxscale.admin_port}
+packages:
+  default: [mariadb-server, mariadb-client]
+  galera: [mariadb-server, mariadb-client, galera-4]
+apt_repository:
+  default: deb.mariadb.org (MariaDB repository, pinned to mariadb-* packages only)
+conflicting_packages:
+  default: [mysql-server, mysql-community-server, mysql-server-8.0, percona-server-server, percona-xtradb-cluster]
+
+# Same fields as mysql.yml. MariaDB GTIDs differ from MySQL's, so replication has its own role.
+ha:
+  async-replication:
+    family: replication
+    failover: manual
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mariadb]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}]
+  semi-sync:
+    family: replication
+    failover: manual
+    semi_sync: true
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mariadb]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}]
+  galera:
+    status: planned
+    family: galera
+    failover: galera
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mariadb, galera_gcomm, galera_ist, galera_sst]
+    client_ports: [mariadb]
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-galera}]
+  maxscale:
+    status: planned
+    family: replication
+    failover: maxscale
+    min_nodes: 3
+    max_nodes: null
+    mesh_ports: [mariadb, maxscale_admin]
+    client_ports: [mariadb, maxscale_rw]
+    ha_endpoint: {port: maxscale_rw, target: maxscale, mode: first-available}
+    provision: [{role: mariadb}]
+    deploy: [{role: mariadb-replication}, {role: maxscale}]

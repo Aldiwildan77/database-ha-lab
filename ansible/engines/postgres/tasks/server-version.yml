@@ -1,0 +1,17 @@
+---
+# PostgreSQL hook: sets lab_db_version to the running server version (unset when the server is down).
+- name: Read PostgreSQL version
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT current_setting('server_version') AS version
+  register: engine_version
+  changed_when: false
+  failed_when: false
+
+- name: Set server version
+  ansible.builtin.set_fact:
+    lab_db_version: "{{ engine_version.query_result[0].version }}"
+  when: engine_version.query_result is defined

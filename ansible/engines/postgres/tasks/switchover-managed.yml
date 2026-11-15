@@ -1,0 +1,6 @@
+---
+# PostgreSQL hook for failover.yml (managed failover). Streaming and synchronous replication fail over manually
+# (failover-*.yml hooks); this runs only for strategies with an HA manager, and none is implemented yet.
+- name: Refuse a strategy with an HA manager
+  ansible.builtin.fail:
+    msg: "{{ ha_provider }} is not implemented for PostgreSQL; only streaming-replication and sync-replication are."

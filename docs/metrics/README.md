@@ -7,10 +7,15 @@ The full catalogue is in [`metrics/schema/metrics.yml`](../../metrics/schema/met
 | Job | Runs on | Port | Produces |
 |---|---|---|---|
 | `node` | every node | 19100 | Host resources, plus `network_*` from the node-to-node probe (textfile, every 30 s) |
-| `mysqld` | every node | 19104 | mysqld_exporter: global status, InnoDB, replication, Group Replication, wsrep |
-| `halab` | every node | 19106 | `metrics/collectors/ha_lab_collector.py`: server-side histograms, replication apply, topology state |
+| `db` | every node | 19104 | The engine's exporter (MySQL: mysqld_exporter): global status, InnoDB, replication, Group Replication, wsrep. Role, name and up metric come from the engine descriptor. |
+| `halab` | every node | 19106 | `metrics/collectors/ha_lab_collector.py` loads `engine_<engine>.py`: server-side histograms, replication apply, topology state |
 | `benchmark` | this machine | 9464 | `benchmark/runner/jtl_exporter.py`: Level 0 and client-side Level 1/2, while a benchmark runs |
 | `local_probe` | this machine | 9465 | `metrics/collectors/local_probe.py`: client-to-node RTT, loss, TCP connect, Tailscale path |
+
+## Engine-neutral topology metrics
+
+Every engine collector emits these with the same names, so failover detection and the benchmark never depend on the database:
+`ha_lab_db_up`, `ha_lab_writable`, `ha_lab_read_only` and `ha_lab_replication_position`. The position is a count of applied transactions for MySQL (GTID set) and a WAL byte offset (LSN minus `0/0`) for PostgreSQL; on PostgreSQL a primary's own reads can add WAL (hint-bit full-page images), so compare positions on an idle cluster. Equal values across nodes mean converged. A new engine adds `metrics/collectors/engine_<engine>.py` with a `Collector(cfg)` that has `.lock` and `.collect(registry)`, and names it in its descriptor (`collector`). Engine-specific Prometheus rules live in `local/prometheus/rules/engine-<engine>.yml`.
 
 ## The levels
 

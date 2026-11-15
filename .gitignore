@@ -22,3 +22,6 @@ __pycache__/
 .ansible/
 !local/state/.gitkeep
 local/tools/
+
+# Local agent worktrees
+.claude/

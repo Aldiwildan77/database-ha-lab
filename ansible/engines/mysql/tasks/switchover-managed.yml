@@ -1,0 +1,31 @@
+---
+# MySQL hook for failover.yml (managed failover). Planned switchover through the HA manager (orchestrator, Group Replication).
+- name: Orchestrator graceful takeover
+  ansible.builtin.command:
+    argv: >-
+      {{ ['orchestrator-client', '-c', 'graceful-master-takeover-auto', '-i', node_fqdn ~ ':' ~ mysql_port]
+         + (['-d', hostvars[new_primary].node_fqdn ~ ':' ~ mysql_port] if new_primary | default('') else []) }}
+  environment:
+    ORCHESTRATOR_API: "http://localhost:{{ orchestrator_http_port }}/api"
+    ORCHESTRATOR_AUTH_USER: orchestrator
+    ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
+  no_log: true
+  run_once: true
+  delegate_to: "{{ (ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('db_up') | rejectattr('read_only') | map(attribute='node') | first) }}"
+  changed_when: true
+  when: lab_ha_strategy.failover == 'orchestrator' and failover_mode == 'switchover'
+
+- name: InnoDB Cluster set primary
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --js
+      - --passwords-from-stdin
+      - "clusteradmin@{{ node_fqdn }}:{{ mysql_port }}"
+      - -e
+      - "dba.getCluster().setPrimaryInstance('{{ hostvars[new_primary | default(groups['mysql_nodes'] | difference([inventory_hostname]) | first)].node_fqdn }}:{{ mysql_port }}')"
+    stdin: "{{ mysql_admin_password }}"
+  no_log: true
+  run_once: true
+  changed_when: true
+  when: lab_ha_strategy.failover == 'group' and failover_mode == 'switchover'

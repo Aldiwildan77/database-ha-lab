@@ -12,12 +12,12 @@
 - Orchestrator is a **topology manager, not a durability mechanism**. It decides who becomes primary. It cannot recover transactions that never left the failed primary.
 - Orchestrator runs on every MySQL node: Percona's `percona-orchestrator` package, which supports MySQL 8.4, from the `pdps-84-lts` / `pdps-80` repository. Its own raft consensus means there is no external backend database and no single orchestrator instance.
 - At least **3 nodes** are required, so raft has a quorum. An odd number is recommended.
-- The HTTP API (lab default port 13000) uses basic auth. The user is `orchestrator`, and the password is `mysql_admin_password`.
+- The HTTP API (lab default port 13000) uses basic auth. The user is `orchestrator`, and the password is `db_admin_password`.
 
 ## Deploy
 
 ```bash
-# config/ha.yml: ha_provider: orchestrator; secrets: mysql_replication_password, mysql_admin_password
+# config/ha.yml: ha_provider: orchestrator; secrets: db_replication_password, db_admin_password
 make ha HA=orchestrator
 ```
 

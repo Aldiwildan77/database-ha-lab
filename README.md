@@ -82,7 +82,7 @@ Open Grafana at http://127.0.0.1:3000. The user is `admin` and the password is i
 | `config/inventory.yml` | Environment name, SSH settings, networks (tailscale / vpn / private), nodes (name, address, network, role, datacenter, optional overrides) |
 | `config/ha.yml` | HA provider, MySQL version and port, global my.cnf options, exporter ports |
 | `config/monitoring.yml` | Scrape address mode, extra allowed sources (for example this machine's network), firewall behaviour, exporter versions |
-| `config/secrets.yml` | exporter, replication, benchmark and admin passwords. Encrypt it with Ansible Vault. Environment variables `LAB_MYSQL_*_PASSWORD` take precedence. |
+| `config/secrets.yml` | exporter, replication, benchmark and admin passwords. Encrypt it with Ansible Vault. Keys are `db_<name>_password` (older `mysql_<name>_password` keys still work). Environment variables `LAB_DB_*_PASSWORD` (or `LAB_MYSQL_*_PASSWORD`) take precedence. |
 | `config/benchmark.yml` | Client location, endpoint, dataset, load defaults, per-scenario overrides |
 
 The `lab_config` inventory plugin (`ansible/plugins/inventory/lab_config.py`) turns these files into the Ansible inventory. It validates them before any play runs and lists every problem it finds. It checks:
@@ -117,7 +117,7 @@ Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha HA=<provider> | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
-Faults          make fault NODE= FAULT=stop-mysql|kill-mysql|isolate|netem [ACTION=restore] CONFIRM=yes
+Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem [ACTION=restore] CONFIRM=yes
 Benchmark       make jmeter-install | benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
 Reports         make report [RUN=<run_id>]
 Status          make status
@@ -151,8 +151,8 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 
 ```text
 config/            user configuration (*.example.yml committed, real files gitignored)
-ansible/           inventory plugin, playbooks, roles (common, mysql, node-exporter, mysql-exporter,
-                   lab-collector, replication, orchestrator, innodb-cluster, percona-xtradb-cluster, percona-repo)
+ansible/           inventory plugin, engine-neutral playbooks and core roles (common, node-exporter, lab-collector)
+ansible/engines/   one folder per database engine: descriptor, roles and hooks (mysql, mariadb, postgres ready; mariadb galera/maxscale and postgres patroni planned)
 ha/<provider>/     architecture, runbooks and limitations per HA provider
 local/             Prometheus, Grafana (dashboards + generator), compose, helper scripts
 metrics/           collectors (stdlib Python), metric schema, quantile recording rules
@@ -161,4 +161,4 @@ benchmark/         runner, JTL exporter, correlation/analysis, consistency valid
 docs/              architecture, runbooks, metrics
 ```
 
-See [docs/architecture/foundation.md](docs/architecture/foundation.md) for design decisions, assumptions and known limitations.
+See [docs/architecture/foundation.md](docs/architecture/foundation.md) for design decisions, assumptions and known limitations, and [docs/architecture/engines.md](docs/architecture/engines.md) for the engine layout and how to add an engine.

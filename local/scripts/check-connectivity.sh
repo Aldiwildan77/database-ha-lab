@@ -3,7 +3,7 @@
 source "$(dirname "$0")/lib.sh"
 require python3 ansible-inventory nc ping
 
-ports="${PORTS:-22 $(lab_var mysql_port) $(lab_var node_exporter_port) $(lab_var mysql_exporter_port) $(lab_var lab_collector_port)}"
+ports="${PORTS:-22 $(lab_var db_port) $(lab_var node_exporter_port) $(lab_var db_exporter_port) $(lab_var lab_collector_port)}"
 fail=0
 nodes="$(lab_nodes)"
 

@@ -330,7 +330,7 @@
     },
     {
       "type": "timeseries",
-      "title": "MySQL up",
+      "title": "Database up",
       "id": 6,
       "datasource": {
         "type": "prometheus",
@@ -349,7 +349,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ha_lab_mysql_up",
+          "expr": "ha_lab_db_up",
           "legendFormat": "{{node}}"
         }
       ],
@@ -382,7 +382,7 @@
     },
     {
       "type": "timeseries",
-      "title": "GTID executed (consistency / catch-up)",
+      "title": "Replication position (consistency / catch-up)",
       "id": 7,
       "datasource": {
         "type": "prometheus",
@@ -401,7 +401,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ha_lab_gtid_executed_transactions",
+          "expr": "ha_lab_replication_position",
           "legendFormat": "{{node}}"
         }
       ],

@@ -1,0 +1,85 @@
+---
+# PostgreSQL hook for failover.yml (manual failover). Fences the old primary by stopping it cleanly, which makes its
+# walsenders ship every WAL record (including the shutdown checkpoint) to the standbys. Waits for the candidates to replay
+# everything they received, then sets fo_new_primary to the candidate with the highest replay LSN. Fails when the
+# requested node is behind another candidate.
+- name: Stop the old primary cleanly (fence)
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", stop, -m, fast]
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  changed_when: true
+  when: failover_mode == 'switchover' or old_primary_up
+
+- name: Read the old primary's last checkpoint
+  ansible.builtin.command:
+    argv: ["{{ pg_bin_dir }}/pg_controldata", -D, "{{ pg_data_dir }}"]
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  register: fo_control
+  changed_when: false
+  when: failover_mode == 'switchover' or old_primary_up
+
+- name: Record the old primary's final WAL position
+  ansible.builtin.set_fact:
+    fo_old_lsn: >-
+      {%- set parts = (fo_control.stdout | regex_search('Latest checkpoint location:\\s+\\S+') | regex_replace('^.*\\s', '')).split('/') -%}
+      {{ (parts[0] | int(base=16)) * 4294967296 + (parts[1] | int(base=16)) }}
+  run_once: true
+  when: fo_control is not skipped
+
+- name: Wait for candidates to replay everything they received
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '0/0')::bigint AS replay,
+             pg_wal_lsn_diff(COALESCE(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), '0/0')::bigint AS received
+  register: fo_pos
+  until:
+    - fo_pos.query_result is defined
+    - fo_pos.query_result[0].replay | int >= fo_pos.query_result[0].received | int
+    - fo_old_lsn is not defined or fo_pos.query_result[0].replay | int > fo_old_lsn | int
+  retries: "{{ ((apply_timeout | default(120)) | int / 2) | int }}"
+  delay: 2
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in candidates
+
+# A candidate that never received the old primary's last WAL (cut off from it) is not eligible.
+- name: Mark candidates that caught up
+  ansible.builtin.set_fact:
+    fo_ready: >-
+      {{ fo_pos.query_result is defined and fo_pos.query_result[0].replay | int >= fo_pos.query_result[0].received | int
+         and (fo_old_lsn is not defined or fo_pos.query_result[0].replay | int > fo_old_lsn | int) }}
+  when: inventory_hostname in candidates
+
+- name: Choose new primary
+  ansible.builtin.set_fact:
+    fo_positions: >-
+      {%- set pos = {} -%}
+      {%- for c in candidates -%}
+      {%- set _ = pos.update({c: (hostvars[c].fo_pos.query_result[0].replay | int) if hostvars[c].fo_pos.query_result is defined else -1}) -%}
+      {%- endfor -%}
+      {{ pos }}
+    fo_new_primary: >-
+      {%- set pos = {} -%}
+      {%- for c in candidates if hostvars[c].fo_ready | bool -%}
+      {%- set _ = pos.update({c: hostvars[c].fo_pos.query_result[0].replay | int}) -%}
+      {%- endfor -%}
+      {%- set best = (pos.values() | max) if pos else 0 -%}
+      {%- set ok = pos | dict2items | selectattr('value', 'equalto', best) | map(attribute='key') | list -%}
+      {{ (new_primary if new_primary | default('') in ok else '') if new_primary | default('') else (ok | first | default('')) }}
+  run_once: true
+
+- name: Refuse when no safe candidate exists
+  ansible.builtin.assert:
+    that: fo_new_primary != ''
+    fail_msg: >-
+      {{ 'The requested ' ~ new_primary ~ ' is behind another candidate or did not receive the old primary last WAL, and would lose transactions.'
+         if new_primary | default('') else 'No candidate replayed everything it received.' }}
+      Replay positions (bytes of WAL, -1 = unreachable): {{ fo_positions }}
+    quiet: true
+  run_once: true

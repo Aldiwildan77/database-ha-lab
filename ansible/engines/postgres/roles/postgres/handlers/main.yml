@@ -1,0 +1,10 @@
+---
+- name: Restart postgres
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", restart]
+  changed_when: true
+
+- name: Reload postgres
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", reload]
+  changed_when: true

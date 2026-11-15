@@ -1,0 +1,8 @@
+---
+# MariaDB hook for failover.yml (manual failover). Points every reachable node at fo_new_primary.
+- name: Repoint reachable nodes to the new primary
+  ansible.builtin.include_role:
+    name: mariadb-replication
+  vars:
+    replication_primary: "{{ fo_new_primary }}"
+  when: lab_topo.db_up

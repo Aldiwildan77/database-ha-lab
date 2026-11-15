@@ -1,0 +1,42 @@
+{{ {
+  "Debug": false,
+  "ListenAddress": ":" ~ orchestrator_http_port,
+  "AuthenticationMethod": "basic",
+  "HTTPAuthUser": orchestrator_user,
+  "HTTPAuthPassword": mysql_admin_password,
+  "MySQLTopologyUser": orchestrator_user,
+  "MySQLTopologyPassword": mysql_admin_password,
+  "MySQLTopologySSLSkipVerify": true,
+  "MySQLTopologyUseMixedTLS": true,
+  "BackendDB": "sqlite",
+  "SQLite3DataFile": "/var/lib/orchestrator/orchestrator.db",
+  "RaftEnabled": true,
+  "RaftDataDir": "/var/lib/orchestrator",
+  "RaftBind": node_fqdn,
+  "RaftAdvertise": node_fqdn,
+  "DefaultRaftPort": orchestrator_raft_port | int,
+  "RaftNodes": groups['db_nodes'] | map('extract', hostvars, 'node_fqdn') | list,
+  "InstancePollSeconds": orchestrator_poll_seconds | int,
+  "DiscoverByShowSlaveHosts": false,
+  "HostnameResolveMethod": "none",
+  "MySQLHostnameResolveMethod": "@@report_host",
+  "DetectClusterAliasQuery": "SELECT 'halab'",
+  "DetectDataCenterQuery": "",
+  "RecoveryPeriodBlockSeconds": orchestrator_recovery_block_seconds | int,
+  "RecoverMasterClusterFilters": ["*"],
+  "RecoverIntermediateMasterClusterFilters": ["*"],
+  "ApplyMySQLPromotionAfterMasterFailover": true,
+  "PreventCrossDataCenterMasterFailover": false,
+  "FailMasterPromotionIfSQLThreadNotUpToDate": false,
+  "DelayMasterPromotionIfSQLThreadNotUpToDate": true,
+  "MasterFailoverDetachReplicaMasterHost": false,
+  "OnFailureDetectionProcesses": [
+    "echo \"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ) detected {failureType} {failedHost}\" >> " ~ orchestrator_failover_log
+  ],
+  "PostMasterFailoverProcesses": [
+    "echo \"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ) promoted {failedHost} -> {successorHost}\" >> " ~ orchestrator_failover_log
+  ],
+  "PostGracefulTakeoverProcesses": [
+    "echo \"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ) graceful-takeover {failedHost} -> {successorHost}\" >> " ~ orchestrator_failover_log
+  ]
+} | to_nice_json }}

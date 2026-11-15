@@ -1,0 +1,22 @@
+---
+# Semi-sync is built into MariaDB. Both sides are configured on every node so any node can be promoted.
+- name: Configure semi-sync
+  ansible.builtin.include_tasks: set-variables.yml
+  vars:
+    replication_vars:
+      rpl_semi_sync_master_timeout: "{{ replication_semi_sync_settings.timeout_ms }}"
+      rpl_semi_sync_master_wait_point: "{{ replication_semi_sync_settings.wait_point }}"
+      rpl_semi_sync_master_enabled: "{{ 'ON' if inventory_hostname == replication_primary else 'OFF' }}"
+      rpl_semi_sync_slave_enabled: "{{ 'OFF' if inventory_hostname == replication_primary else 'ON' }}"
+
+# The replica only negotiates semi-sync when its IO thread (re)connects.
+- name: Restart replica IO thread to apply semi-sync
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query:
+      - STOP SLAVE IO_THREAD
+      - START SLAVE IO_THREAD
+  when:
+    - inventory_hostname != replication_primary
+    - replication_status | length > 0
+    - replication_vars_changed

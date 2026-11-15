@@ -15,9 +15,9 @@
 
     - name: Check required secrets
       ansible.builtin.assert:
-        that: mysql_exporter_password | length >= 16
+        that: db_exporter_password | length >= 16
         fail_msg: >-
-          mysql_exporter_password is missing or shorter than 16 characters.
+          db_exporter_password is missing or shorter than 16 characters.
           Set it in config/secrets.yml or LAB_MYSQL_EXPORTER_PASSWORD.
         quiet: true
       no_log: true
@@ -27,7 +27,7 @@
       ansible.builtin.import_tasks: ../tasks/preflight-local.yml
 
 - name: Validate remote nodes
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   tags: [remote]
   tasks:

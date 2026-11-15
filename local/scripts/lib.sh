@@ -22,8 +22,8 @@ lab_nodes() {
 import json, sys
 inv = json.load(sys.stdin)
 hv = inv.get("_meta", {}).get("hostvars", {})
-for h in inv.get("mysql_nodes", {}).get("hosts", []) or sorted(
-        {x for g in inv.get("mysql_nodes", {}).get("children", []) for x in inv.get(g, {}).get("hosts", [])}):
+for h in inv.get("db_nodes", {}).get("hosts", []) or sorted(
+        {x for g in inv.get("db_nodes", {}).get("children", []) for x in inv.get(g, {}).get("hosts", [])}):
     v = hv[h]
     val = lambda x: x.get("__ansible_unsafe", x) if isinstance(x, dict) else x
     print(h, *(val(v[k]) for k in ("node_address", "node_role", "node_datacenter", "node_network_type")))

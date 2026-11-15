@@ -1,0 +1,14 @@
+---
+replication_socket: /run/mysqld/mysqld.sock
+replication_user: repl
+replication_ssl: "{{ (lab_ha.replication | default({})).ssl | default(true) }}"
+replication_semi_sync: "{{ lab_ha_strategy.semi_sync | default(false) }}"
+# Primary for the initial build; failover.yml passes the current primary instead.
+replication_primary: "{{ groups['role_primary'][0] }}"
+# Written by set-variables.yml so read_only and semi-sync survive a restart.
+replication_state_file: /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+
+replication_semi_sync_settings:
+  wait_for_replica_count: "{{ (lab_ha.semi_sync | default({})).wait_for_replica_count | default(1) }}"
+  timeout_ms: "{{ (lab_ha.semi_sync | default({})).timeout_ms | default(10000) }}"
+  wait_point: "{{ (lab_ha.semi_sync | default({})).wait_point | default('AFTER_SYNC') }}"

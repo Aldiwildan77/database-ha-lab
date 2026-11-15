@@ -1,0 +1,17 @@
+---
+# MariaDB hook for failover.yml (manual failover). Makes fo_new_primary writable and detaches it from replication.
+- name: Detach the new primary from its old source
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query:
+      - STOP SLAVE
+      - RESET SLAVE ALL
+  when: inventory_hostname == fo_new_primary
+
+- name: Make the new primary writable
+  ansible.builtin.include_role:
+    name: mariadb-replication
+    tasks_from: set-variables
+  vars:
+    replication_vars: {read_only: 0}
+  when: inventory_hostname == fo_new_primary

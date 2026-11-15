@@ -23,7 +23,7 @@
 ## Deploy
 
 ```bash
-# config/ha.yml: ha_provider: innodb-cluster; secrets: mysql_admin_password
+# config/ha.yml: ha_provider: innodb-cluster; secrets: db_admin_password
 make ha HA=innodb-cluster
 ```
 

@@ -1,0 +1,127 @@
+---
+- name: Require admin password
+  ansible.builtin.assert:
+    that: mysql_admin_password | length >= 16
+    fail_msg: Set mysql_admin_password (>= 16 chars); orchestrator uses it for its MySQL user and HTTP basic auth.
+    quiet: true
+  no_log: true
+
+- name: Read super_read_only
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: SELECT @@GLOBAL.super_read_only AS sro
+  register: orchestrator_sro
+  changed_when: false
+
+# super_read_only blocks even sql_log_bin=0 statements on replicas, so it is lifted around the account change.
+- name: Create orchestrator account without logging it
+  vars:
+    orchestrator_was_sro: "{{ orchestrator_sro.query_result[0][0].sro | int == 1 }}"
+  block:
+    - name: Lift super_read_only temporarily
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = OFF
+      when: orchestrator_was_sro | bool
+      changed_when: false
+
+    - name: Create orchestrator topology account
+      ansible.mysql.mysql_user:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: "{{ orchestrator_user }}"
+        host: "{{ client_host }}"
+        plugin: caching_sha2_password
+        plugin_auth_string: "{{ mysql_admin_password }}"
+        salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
+        priv: "*.*:SUPER,PROCESS,REPLICATION SLAVE,REPLICATION CLIENT,RELOAD/mysql.slave_master_info:SELECT/performance_schema.*:SELECT"
+        session_vars:
+          sql_log_bin: 0
+        state: present
+      loop: "{{ mysql_client_hosts }}"
+      loop_control:
+        loop_var: client_host
+      no_log: true
+  always:
+    - name: Restore super_read_only
+      ansible.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: SET GLOBAL super_read_only = ON
+      when: orchestrator_was_sro | bool
+      changed_when: false
+
+- name: Enable Percona repository
+  ansible.builtin.include_role:
+    name: percona-repo
+  vars:
+    percona_repo: "{{ orchestrator_percona_repo }}"
+
+- name: Install orchestrator
+  ansible.builtin.apt:
+    name: [percona-orchestrator, percona-orchestrator-client, jq]
+    state: present
+
+- name: Create orchestrator state directory
+  ansible.builtin.file:
+    path: /var/lib/orchestrator
+    state: directory
+    mode: "0750"
+
+- name: Write orchestrator configuration
+  ansible.builtin.template:
+    src: orchestrator.conf.json.j2
+    dest: /etc/orchestrator.conf.json
+    mode: "0600"
+  no_log: true
+  notify: Restart orchestrator
+
+- name: Start orchestrator
+  ansible.builtin.systemd_service:
+    name: orchestrator
+    state: started
+    enabled: true
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for a raft leader
+  ansible.builtin.uri:
+    url: "http://localhost:{{ orchestrator_http_port }}/api/raft-leader"
+    user: "{{ orchestrator_user }}"
+    password: "{{ mysql_admin_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: orchestrator_leader
+  until: orchestrator_leader.status == 200 and orchestrator_leader.content | length > 2
+  retries: 30
+  delay: 2
+  no_log: true
+
+- name: Discover the topology from the primary
+  ansible.builtin.command:
+    argv: [orchestrator-client, -c, discover, -i, "{{ hostvars[groups['role_primary'][0]].node_fqdn }}:{{ mysql_port }}"]
+  environment:
+    ORCHESTRATOR_API: "{{ orchestrator_api }}"
+    ORCHESTRATOR_AUTH_USER: "{{ orchestrator_user }}"
+    ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
+  run_once: true
+  changed_when: false
+  no_log: true
+
+- name: Wait until every node is discovered
+  ansible.builtin.command:
+    argv: [orchestrator-client, -c, topology, -alias, halab]
+  environment:
+    ORCHESTRATOR_API: "{{ orchestrator_api }}"
+    ORCHESTRATOR_AUTH_USER: "{{ orchestrator_user }}"
+    ORCHESTRATOR_AUTH_PASSWORD: "{{ mysql_admin_password }}"
+  register: orchestrator_topology
+  until: orchestrator_topology.stdout_lines | length == groups['db_nodes'] | length
+  retries: 20
+  delay: 3
+  run_once: true
+  changed_when: false
+
+- name: Show orchestrator topology
+  ansible.builtin.debug:
+    var: orchestrator_topology.stdout_lines
+  run_once: true

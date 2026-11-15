@@ -1,0 +1,18 @@
+---
+# PostgreSQL hook for consistency.yml. Writes the run's txn_ids to {{ ledger_file }} and registers cs_dump;
+# cs_dump.stdout is '<WAL position in bytes> <accounts rows> <accounts balance sum>'.
+- name: Export txn_ids for the run
+  become: true
+  become_user: postgres
+  ansible.builtin.shell: |
+    set -o pipefail
+    psql -X -v ON_ERROR_STOP=1 -h {{ pg_socket_dir }} -p {{ pg_port }} -d '{{ db }}' -At \
+      -c "SELECT txn_id FROM ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > {{ ledger_file }}
+    psql -X -v ON_ERROR_STOP=1 -h {{ pg_socket_dir }} -p {{ pg_port }} -d '{{ db }}' -At -F ' ' \
+      -c "SELECT pg_wal_lsn_diff(CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_insert_lsn() END, '0/0')::bigint, COUNT(*), COALESCE(SUM(balance), 0) FROM accounts"
+  args:
+    executable: /bin/bash
+  register: cs_dump
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true

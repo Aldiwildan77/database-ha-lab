@@ -492,7 +492,7 @@
     },
     {
       "type": "stat",
-      "title": "MySQL up",
+      "title": "Database up",
       "id": 11,
       "datasource": {
         "type": "prometheus",
@@ -511,7 +511,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ha_lab_mysql_up",
+          "expr": "ha_lab_db_up",
           "legendFormat": "{{node}}"
         }
       ],

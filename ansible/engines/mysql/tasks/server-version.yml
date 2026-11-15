@@ -1,0 +1,13 @@
+---
+# MySQL hook: sets lab_db_version to the running server version (unset when the server is down).
+- name: Read MySQL version
+  ansible.mysql.mysql_info:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    filter: [version]
+  register: engine_version
+  failed_when: false
+
+- name: Set server version
+  ansible.builtin.set_fact:
+    lab_db_version: "{{ engine_version.version.full }}"
+  when: engine_version.version is defined

@@ -1,0 +1,78 @@
+---
+# PostgreSQL hook for recover.yml. Rejoins `node` to the topology led by rc_primary.
+# A node that comes back as a standby is repointed. One that comes back as a primary (the old primary after an
+# unplanned failover) is shut down, rewound to the new timeline with pg_rewind, and started as a standby.
+# -e postgres_rebuild=true replaces its data with a fresh base backup when it cannot be rewound.
+- name: Rejoin the node
+  vars:
+    replication_primary: "{{ rc_primary }}"
+  when:
+    - lab_ha_strategy.family == 'replication'
+    - inventory_hostname == node
+    - rc_primary != ''
+  block:
+    - name: Write the postgres user's password file
+      ansible.builtin.include_role:
+        name: postgres-replication
+        tasks_from: passfile
+
+    - name: Read the node's state
+      become: true
+      become_user: postgres
+      module_defaults:
+        group/community.postgresql.all: "{{ pg_conn }}"
+      community.postgresql.postgresql_query:
+        query: SELECT pg_is_in_recovery() AS in_recovery
+      register: rc_state
+      changed_when: false
+
+    - name: Rewind a node that came back as a primary
+      when: not rc_state.query_result[0].in_recovery
+      block:
+        - name: Stop the stale primary
+          ansible.builtin.command:
+            argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", stop, -m, fast]
+          changed_when: true
+          when: not (postgres_rebuild | default(false) | bool)
+
+        - name: Rewind to the new primary
+          become: true
+          become_user: postgres
+          ansible.builtin.command:
+            argv:
+              - "{{ pg_bin_dir }}/pg_rewind"
+              - --target-pgdata={{ pg_data_dir }}
+              - --source-server=host={{ hostvars[rc_primary].node_fqdn }} port={{ pg_port }} user={{ pg_rewind_user }} dbname=postgres sslmode=require passfile={{ pg_passfile }}
+          register: rc_rewind
+          changed_when: "'no rewind required' not in rc_rewind.stdout + rc_rewind.stderr"
+          failed_when: false
+          when: db_admin_password | length > 0 and not (postgres_rebuild | default(false) | bool)
+
+        - name: Explain a failed rewind
+          ansible.builtin.fail:
+            msg: >-
+              {{ inventory_hostname }} cannot be rewound onto {{ rc_primary }}
+              ({{ (rc_rewind.stderr | default('db_admin_password is not set; pg_rewind needs the rewind role')) | trim }}).
+              Re-run with -e postgres_rebuild=true to replace its data with a base backup of {{ rc_primary }}.
+          when: not (postgres_rebuild | default(false) | bool) and (rc_rewind.rc | default(1)) != 0
+
+        - name: Replace the data with a base backup
+          ansible.builtin.include_role:
+            name: postgres-replication
+            tasks_from: rebuild
+          vars:
+            postgres_rebuild_replica: true
+          when: postgres_rebuild | default(false) | bool
+
+        - name: Start the rewound node as a standby
+          ansible.builtin.include_role:
+            name: postgres-replication
+            tasks_from: offline
+          vars:
+            replication_fresh_copy: true
+          when: not (postgres_rebuild | default(false) | bool)
+
+    - name: Follow the new primary
+      ansible.builtin.include_role:
+        name: postgres-replication
+        tasks_from: standby

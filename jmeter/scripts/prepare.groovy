@@ -7,23 +7,17 @@ int rows = Integer.parseInt(props.getProperty('rows', '100000'))
 long seed = Long.parseLong(props.getProperty('seed', '42'))
 String db = props.getProperty('database', 'halab')
 
-Properties p = new Properties(); p.putAll(props); p.setProperty('database', '')
-Map c = LabDb.connect(p, true)
+def D = LabDb.dialect(props)
+Properties p = new Properties(); p.putAll(props); p.setProperty('database', D.adminDatabase())
+Map admin = LabDb.connect(p, true)
+admin.conn.setAutoCommit(true)
+D.createDatabase(admin.conn, db)
+admin.conn.close()
+Map c = LabDb.connect(props, true)
 Connection conn = c.conn
 conn.setAutoCommit(true)
 Statement st = conn.createStatement()
-st.execute("CREATE DATABASE IF NOT EXISTS `${db}`")
-st.execute("USE `${db}`")
-st.execute('''CREATE TABLE IF NOT EXISTS accounts (
-  id BIGINT PRIMARY KEY, balance BIGINT NOT NULL, payload VARCHAR(255) NOT NULL,
-  updated_at DATETIME(6) NOT NULL) ENGINE=InnoDB''')
-st.execute('''CREATE TABLE IF NOT EXISTS ha_ledger (
-  txn_id VARCHAR(96) PRIMARY KEY, run_id VARCHAR(48) NOT NULL, thread VARCHAR(48) NOT NULL,
-  seq BIGINT NOT NULL, client_epoch_ms BIGINT NOT NULL, served_by VARCHAR(255) NOT NULL,
-  server_ts DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), payload VARCHAR(255) NOT NULL,
-  KEY run_idx (run_id)) ENGINE=InnoDB''')
-st.execute('''CREATE TABLE IF NOT EXISTS dataset_info (
-  id TINYINT PRIMARY KEY, row_count BIGINT NOT NULL, seed BIGINT NOT NULL, loaded_at DATETIME(6) NOT NULL) ENGINE=InnoDB''')
+D.schema().each { st.execute(it) }
 
 ResultSet rs = st.executeQuery('SELECT row_count, seed FROM dataset_info WHERE id = 1')
 boolean current = rs.next() && rs.getLong(1) == rows && rs.getLong(2) == seed
@@ -45,7 +39,7 @@ if (!current) {
     }
     ps.close()
     conn.setAutoCommit(true)
-    st.execute("REPLACE INTO dataset_info VALUES (1, ${rows}, ${seed}, NOW(6))")
+    st.execute(D.upsertDatasetInfo(rows, seed))
 } else {
     log.info("prepare: dataset already loaded (${rows} rows, seed ${seed})")
 }

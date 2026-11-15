@@ -31,7 +31,7 @@ def compare(rows, ledger_dir, final_primary):
             nodes[name] = {"reachable": ids is not None, "ids": ids,
                            "accounts_rows": parts[-2] if len(parts) >= 2 else None,
                            "accounts_balance_sum": parts[-1] if len(parts) >= 2 else None,
-                           "gtid_executed": " ".join(parts[:-2]) if len(parts) > 2 else None}
+                           "position": " ".join(parts[:-2]) if len(parts) > 2 else None}
 
     result = {"acknowledged_writes": len(acked), "failed_writes": len(failed_definite),
               "indeterminate_writes": len(unknown), "final_primary": final_primary, "nodes": {}}

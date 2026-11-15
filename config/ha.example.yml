@@ -1,5 +1,13 @@
 ---
-# async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
+# Database engine. Each engine is a descriptor in ansible/engines/<name>/engine.yml.
+#   mysql    ready:   async-replication | semi-sync | orchestrator | innodb-cluster | percona-xtradb-cluster
+#   mariadb  ready:   async-replication | semi-sync   (galera and maxscale are planned and refused)
+#   postgres ready:   streaming-replication | sync-replication   (patroni is planned and refused)
+# A planned engine or strategy is refused at validate time until its roles exist.
+db_engine: mysql
+
+# mysql:    async-replication | orchestrator | semi-sync | innodb-cluster | percona-xtradb-cluster
+# postgres: streaming-replication | sync-replication
 # Provisioning installs the server packages; `make ha` builds the topology.
 # percona-xtradb-cluster installs Percona packages instead of Oracle MySQL and forms the cluster during provisioning.
 ha_provider: async-replication
@@ -12,18 +20,41 @@ mysql:
   buffer_pool_ratio: 0.5    # share of RAM for InnoDB; use 0.25 or less on servers running other services
   config: {}                # extra my.cnf [mysqld] options for all nodes
 
+# Used when db_engine is mariadb (same keys as the mysql section; port 13306 differs from the standard 3306).
+# Per-node server options go under the node's `mariadb:` key in inventory.yml.
+mariadb:
+  version: "11.4"           # "10.11", "11.4" or "11.8"
+  port: 13306
+  buffer_pool_ratio: 0.5
+  config: {}                # extra [mariadbd] options for all nodes
+
+# Used when db_engine is postgres. One cluster named halab per node; every node is created standalone
+# and make ha turns the replicas into streaming standbys of the node with role primary.
+postgres:
+  version: "17"             # "16", "17" or "18"; installed from apt.postgresql.org (PGDG)
+  port: 15432               # standard is 5432
+  shared_buffers_ratio: 0.25  # share of RAM for shared_buffers; lower it on servers running other services
+  config: {}                # extra postgresql.conf options for all nodes
+
+# sync-replication: the primary waits for acknowledgement from num_sync standbys (ANY n of the other nodes).
+# With fewer reachable standbys than num_sync, commits wait; this is the cost of no data loss.
+sync_replication:
+  num_sync: 1
+  commit_level: "on"        # on (standby flushed) | remote_write | remote_apply
+
 monitoring:
   enabled: true
   node_exporter_port: 19100   # standard 9100
   mysql_exporter_port: 19104  # standard 9104
+  postgres_exporter_port: 19187  # standard 9187
   lab_collector_port: 19106
 
 replication:
   ssl: true                      # replication channel uses TLS (MySQL auto-generated certs)
 
 semi_sync:
-  wait_for_replica_count: 1      # rpl_semi_sync_source_wait_for_replica_count
-  timeout_ms: 10000              # after this the source silently falls back to async
+  wait_for_replica_count: 1      # rpl_semi_sync_source_wait_for_replica_count (MariaDB: must be 1)
+  timeout_ms: 10000              # after this the source silently falls back to async (MariaDB: rpl_semi_sync_master_timeout)
   wait_point: AFTER_SYNC         # AFTER_SYNC (lossless) | AFTER_COMMIT
 
 orchestrator:

@@ -1,0 +1,25 @@
+---
+# MySQL hook for check-mesh.yml: logs in to every peer over TLS. Registers mesh_login (results with rc).
+- name: MySQL login to every peer over TLS (replication account, else benchmark account)
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=TCP
+      - "--host={{ hostvars[item].node_address }}"
+      - "--port={{ mysql_port }}"
+      - "--user={{ 'repl' if db_replication_password | length > 0 else 'bench' }}"
+      - --ssl-mode=REQUIRED
+      - --connect-timeout=5
+      - -N
+      - -e
+      - SELECT CONCAT(@@report_host, ' tls=', IF(VARIABLE_VALUE = '', 'no', VARIABLE_VALUE)) FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_version'
+  environment:
+    MYSQL_PWD: "{{ db_replication_password if db_replication_password | length > 0 else db_benchmark_password }}"
+  loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+  register: mesh_login
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - (db_replication_password | length > 0) or (db_benchmark_password | length > 0)
+    - hostvars[item].mesh_port_state[mysql_port | string] == 'service'

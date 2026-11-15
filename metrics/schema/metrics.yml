@@ -23,7 +23,8 @@ levels:
     - {name: transaction_duration_seconds, type: histogram, unit: s, side: client, measurement: direct, labels: [side, operation],
        note: "BEGIN..COMMIT without connect. Server-side transaction time is database_transaction_seconds_total (mean only)."}
     - {name: replication_duration_seconds, implemented_as: replication_apply_duration_seconds, type: histogram, unit: s, side: server, measurement: sampled}
-    - {name: storage_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total, node_disk_*_time_seconds_total", type: counter-pair, unit: s, side: server+host, measurement: derived,
+    - {name: storage_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total, node_disk_*_time_seconds_total",
+       type: counter-pair, unit: s, side: server+host, measurement: derived,
        note: "Means only. Per-I/O distributions need eBPF (biolatency), not part of this lab."}
 
   2_subcomponent:
@@ -76,7 +77,7 @@ levels:
     recording_rules: local/prometheus/rules/lab.yml
 
   4_ha:
-    topology (ha_lab_collector, all providers): [ha_lab_mysql_up, ha_lab_writable, ha_lab_read_only, ha_lab_super_read_only, ha_lab_gtid_executed_transactions]
+    topology (ha_lab_collector, all providers): [ha_lab_db_up, ha_lab_writable, ha_lab_read_only, ha_lab_super_read_only, ha_lab_replication_position]
     async_semi_sync:
       collector: [ha_lab_replica_configured, ha_lab_replica_io_running, ha_lab_replica_sql_running, ha_lab_semi_sync_source_active]
       mysqld_exporter: [mysql_slave_status_seconds_behind_source, mysql_slave_status_relay_log_space, mysql_slave_status_retrieved_gtid_set (label),

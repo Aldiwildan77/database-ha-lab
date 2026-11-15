@@ -1,0 +1,37 @@
+---
+# MySQL hook for destroy-ha.yml with destroy_data=true. Stops the server, purges its packages,
+# then deletes datadir and config (see destroy-purge-paths in the playbook for lab-owned paths).
+- name: Stop MySQL
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+  loop: [mysql, mysql@bootstrap]
+  failed_when: false
+
+- name: Purge server packages
+  ansible.builtin.apt:
+    name:
+      - mysql-server
+      - mysql-community-server
+      - mysql-community-server-core
+      - mysql-router
+      - mysql-router-community
+      - mysql-shell
+      - percona-xtradb-cluster
+      - percona-xtradb-cluster-server
+      - percona-xtradb-cluster-client
+      - percona-orchestrator
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Delete datadir and config
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/mysql
+    - /var/lib/mysql-files
+    - /etc/mysql
+    - /etc/mysqlrouter
+    - /etc/apt/preferences.d/mysql

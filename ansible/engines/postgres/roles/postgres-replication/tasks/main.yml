@@ -1,0 +1,35 @@
+---
+- name: Require replication password
+  ansible.builtin.assert:
+    that: db_replication_password | length >= 16
+    fail_msg: Set db_replication_password (>= 16 chars) in config/secrets.yml or LAB_DB_REPLICATION_PASSWORD.
+    quiet: true
+  no_log: true
+
+- name: Write the postgres user's password file
+  ansible.builtin.include_tasks: passfile.yml
+
+- name: Configure primary
+  ansible.builtin.include_tasks: primary.yml
+  when: inventory_hostname == replication_primary
+
+- name: Configure standby
+  ansible.builtin.include_tasks: standby.yml
+  when: inventory_hostname != replication_primary
+
+- name: Wait until every standby streams from the primary
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  community.postgresql.postgresql_query:
+    query: SELECT count(*) AS n FROM pg_stat_replication WHERE state = 'streaming'
+  register: replication_streaming
+  until: replication_streaming.query_result[0].n | int >= (groups['db_nodes'] | length) - 1
+  retries: "{{ replication_wait_retries }}"
+  delay: "{{ replication_wait_delay }}"
+  changed_when: false
+  when: inventory_hostname == replication_primary
+
+- name: Configure synchronous replication
+  ansible.builtin.include_tasks: sync.yml

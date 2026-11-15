@@ -15,7 +15,7 @@ name: lab_config
 short_description: Build inventory from mysql-ha-lab config/*.yml
 description:
   - Reads config/inventory.yml, config/ha.yml and config/monitoring.yml,
-    validates them and exposes nodes as hosts in the C(mysql_nodes) group.
+    validates them and exposes nodes as hosts in the C(db_nodes) group (alias C(mysql_nodes)).
 options:
   plugin:
     description: Name of the plugin.
@@ -33,31 +33,16 @@ import re
 from ansible.errors import AnsibleParserError
 from ansible.plugins.inventory import BaseInventoryPlugin
 
-HA_PROVIDERS = {
-    # provider: (minimum nodes, maximum nodes or None, phase status)
-    "async-replication": (2, None),
-    "orchestrator": (3, None),
-    "semi-sync": (2, None),
-    "innodb-cluster": (3, 9),
-    "percona-xtradb-cluster": (3, None),
-}
-# Lab defaults deliberately differ from each product's standard port (3306, 9100, 9104, 3000, 6446,
-# 4567 ...) so the lab never collides with an existing installation on the same host.
-DEFAULT_PORTS = {
-    "mysql": 13306,
+DEFAULT_ENGINE = "mysql"
+# Core ports. Engine ports (database, engine exporter, HA components) come from ansible/engines/<engine>/engine.yml.
+# Lab defaults deliberately differ from each product's standard port so the lab never collides with an
+# existing installation on the same host.
+CORE_PORTS = {
     "node_exporter": 19100,
-    "mysql_exporter": 19104,
     "lab_collector": 19106,
-    "orchestrator_http": 13000,
-    "orchestrator_raft": 13008,
-    "router_rw": 16446,          # read-only port is router_rw + 1
-    "pxc_sst": 14444,
-    "pxc_gcomm": 14567,
-    "pxc_ist": 14568,
     "iperf": 15201,
 }
 NODE_ROLES = {"primary", "replica"}
-MYSQL_VERSIONS = {"8.0", "8.4"}
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?$")
@@ -101,27 +86,32 @@ def mysql_host_pattern(cidr: str):
     return str(net.network_address) if net.prefixlen == 32 else f"{net.network_address}/{net.netmask}"
 
 
-def resolve_ports(ha: dict, mon: dict) -> dict:
-    """Effective lab ports: config value or the lab default."""
-    mysql = ha.get("mysql") or {}
+def _dig(data: dict, dotted: str):
+    for part in dotted.split("."):
+        if not isinstance(data, dict) or part not in data:
+            return None
+        data = data[part]
+    return data
+
+
+def resolve_ports(ha: dict, mon: dict, engine: dict) -> dict:
+    """Effective lab ports: config value or default (core ports plus the engine's own)."""
     hm = ha.get("monitoring") or {}
-    orch = ha.get("orchestrator") or {}
-    router = (ha.get("innodb_cluster") or {}).get("router") or {}
-    pxc = ha.get("percona_xtradb_cluster") or {}
-    d = DEFAULT_PORTS
-    return {
-        "mysql": mysql.get("port", d["mysql"]),
-        "node_exporter": hm.get("node_exporter_port", d["node_exporter"]),
-        "mysql_exporter": hm.get("mysql_exporter_port", d["mysql_exporter"]),
-        "lab_collector": hm.get("lab_collector_port", d["lab_collector"]),
-        "orchestrator_http": orch.get("http_port", d["orchestrator_http"]),
-        "orchestrator_raft": orch.get("raft_port", d["orchestrator_raft"]),
-        "router_rw": router.get("rw_port", d["router_rw"]),
-        "pxc_sst": pxc.get("sst_port", d["pxc_sst"]),
-        "pxc_gcomm": pxc.get("gcomm_port", d["pxc_gcomm"]),
-        "pxc_ist": pxc.get("ist_port", d["pxc_ist"]),
-        "iperf": (mon or {}).get("iperf_port", d["iperf"]),
+    ports = {
+        "node_exporter": hm.get("node_exporter_port", CORE_PORTS["node_exporter"]),
+        "lab_collector": hm.get("lab_collector_port", CORE_PORTS["lab_collector"]),
+        "iperf": (mon or {}).get("iperf_port", CORE_PORTS["iperf"]),
     }
+    for name, spec in (engine.get("ports") or {}).items():
+        value = _dig(ha, spec["config"]) if spec.get("config") else None
+        ports[name] = spec["default"] if value is None else value
+    return ports
+
+
+def port_value(token: str, ports: dict) -> int:
+    """Engine descriptors name ports ('mysql', 'router_rw+1'); resolve against the effective lab ports."""
+    name, _, plus = str(token).partition("+")
+    return int(ports[name]) + (int(plus) if plus else 0)
 
 
 def group_safe(value: str) -> str:
@@ -163,8 +153,11 @@ class InventoryModule(BaseInventoryPlugin):
 
         errors: list[str] = []
         warnings: list[str] = []
+        engines = self._engines(lab_root)
+        engine_name = ha.get("db_engine", DEFAULT_ENGINE)
+        engine = engines.get(engine_name)
         networks = self._networks(inv, errors)
-        nodes = self._validate(inv, ha, mon, networks, errors, warnings)
+        nodes = self._validate(inv, ha, mon, networks, engines, engine_name, errors, warnings)
         if errors:
             msg = "\n  - ".join(errors)
             raise AnsibleParserError(f"lab_config: configuration is invalid:\n  - {msg}")
@@ -173,7 +166,9 @@ class InventoryModule(BaseInventoryPlugin):
 
         env = inv.get("environment") or {}
         ssh = inv.get("ssh") or {}
-        mysql = ha.get("mysql") or {}
+        section = engine.get("config_section", "mysql")
+        mysql = ha.get(section) or {}
+        engine_cfg = mysql
         ha_mon = ha.get("monitoring") or {}
 
         used = {n["_network"] for n in nodes}
@@ -183,22 +178,29 @@ class InventoryModule(BaseInventoryPlugin):
         client_hosts = sorted({h for h in (mysql_host_pattern(c) for c in client_cidrs) if h})
 
         provider = ha["ha_provider"]
+        strategy = engine["ha"][provider]
         router = (ha.get("innodb_cluster") or {}).get("router") or {}
-        ports = {k: int(v) for k, v in resolve_ports(ha, mon).items()}
-        mysql_port = ports["mysql"]
-        mesh_ports = {
-            "async-replication": [mysql_port],
-            "semi-sync": [mysql_port],
-            "orchestrator": [mysql_port, ports["orchestrator_http"], ports["orchestrator_raft"]],
-            "innodb-cluster": [mysql_port],
-            "percona-xtradb-cluster": [mysql_port, ports["pxc_sst"], ports["pxc_gcomm"], ports["pxc_ist"]],
-        }[provider]
-        client_ports = [mysql_port]
-        if provider == "innodb-cluster" and router.get("enabled", True):
-            client_ports += [ports["router_rw"], ports["router_rw"] + 1]
-        monitoring_ports = [ports["node_exporter"], ports["mysql_exporter"], ports["lab_collector"]]
+        ports = {k: int(v) for k, v in resolve_ports(ha, mon, engine).items()}
+        mysql_port = ports[engine["primary_port"]]
+        mesh_ports = [port_value(t, ports) for t in strategy["mesh_ports"]]
+        client_ports = [port_value(t, ports) for t in strategy["client_ports"]]
+        optional = strategy.get("optional_client_ports")
+        if optional:
+            section = ha.get(provider.replace("-", "_")) or {}
+            if (section.get(optional["feature"]) or {}).get("enabled", True):
+                client_ports += [port_value(t, ports) for t in optional["ports"]]
+        ha_endpoint = {}
+        spec = strategy.get("ha_endpoint")
+        if spec:
+            section = ha.get(provider.replace("-", "_")) or {}
+            if not spec.get("feature") or (section.get(spec["feature"]) or {}).get("enabled", True):
+                ha_endpoint = {"port": port_value(spec["port"], ports), "target": spec["target"], "mode": spec["mode"]}
+        monitoring_ports = [ports["node_exporter"], ports[engine["exporter_port"]], ports["lab_collector"]]
 
+        self.inventory.add_group("db_nodes")
+        # Older name kept as an alias so existing ad-hoc commands (-l mysql_nodes) still work.
         self.inventory.add_group("mysql_nodes")
+        self.inventory.add_child("mysql_nodes", "db_nodes")
         all_vars = {
             "lab_root": lab_root,
             "lab_config_dir": config_dir,
@@ -208,26 +210,41 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_mixed_networks": len(used) > 1,
             "lab_unencrypted_networks": sorted(n for n in used if not networks[n]["encrypted"]),
             "lab_allowed_sources": client_cidrs,
-            "lab_ha_min_nodes": HA_PROVIDERS[provider][0],
+            "db_engine": engine_name,
+            "lab_engine_dir": engine["_dir"],
+            "lab_engine_tasks": os.path.join(engine["_dir"], "tasks"),
+            "lab_engine": engine,
+            "lab_ha_strategy": strategy,
+            "lab_ha_endpoint": ha_endpoint,
+            "lab_ha_min_nodes": strategy["min_nodes"],
             "lab_mesh_tcp_ports": mesh_ports,
             "lab_mesh_udp_ports": [],
             "lab_client_tcp_ports": client_ports,
             "lab_monitoring_tcp_ports": monitoring_ports if bool(ha_mon.get("enabled", True)) else [],
             "mysql_client_hosts": client_hosts,
             "ha_provider": ha["ha_provider"],
-            "mysql_version": str(mysql.get("version", "8.4")),
+            "db_version": str(engine_cfg.get("version", engine["default_version"])),
+            "mysql_version": str(engine_cfg.get("version", engine["default_version"])),
             "mysql_port": mysql_port,
             "lab_ports": ports,
-            "orchestrator_http_port": ports["orchestrator_http"],
-            "orchestrator_raft_port": ports["orchestrator_raft"],
-            "router_rw_port": ports["router_rw"],
-            "pxc_sst_port": ports["pxc_sst"],
-            "pxc_gcomm_port": ports["pxc_gcomm"],
-            "pxc_ist_port": ports["pxc_ist"],
+            "orchestrator_http_port": ports.get("orchestrator_http"),
+            "orchestrator_raft_port": ports.get("orchestrator_raft"),
+            "router_rw_port": ports.get("router_rw"),
+            "pxc_sst_port": ports.get("pxc_sst"),
+            "pxc_gcomm_port": ports.get("pxc_gcomm"),
+            "pxc_ist_port": ports.get("pxc_ist"),
             "lab_iperf_port": ports["iperf"],
             "mysql_config": mysql.get("config") or {},
+            "db_config": engine_cfg.get("config") or {},
             "monitoring_enabled": bool(ha_mon.get("enabled", True)),
-            "mysql_exporter_port": ports["mysql_exporter"],
+            "mysql_exporter_port": ports[engine["exporter_port"]],
+            "lab_engine_settings": mysql,
+            "db_port": mysql_port,
+            "db_exporter_port": ports[engine["exporter_port"]],
+            "db_exporter_role": engine["exporter"]["role"],
+            "db_exporter_name": engine["exporter"]["name"],
+            "db_exporter_up_metric": engine["exporter"]["up_metric"],
+            "db_collector_module": engine["collector"]["module"],
             "node_exporter_port": ports["node_exporter"],
             "lab_collector_port": ports["lab_collector"],
             "lab_monitoring": mon,
@@ -236,7 +253,7 @@ class InventoryModule(BaseInventoryPlugin):
             "lab_node_count": len(nodes),
         }
         for k, v in all_vars.items():
-            self.inventory.set_variable("mysql_nodes", k, v)
+            self.inventory.set_variable("db_nodes", k, v)
         # Also expose to implicit localhost through the "all" group.
         for k, v in all_vars.items():
             self.inventory.set_variable("all", k, v)
@@ -244,14 +261,14 @@ class InventoryModule(BaseInventoryPlugin):
         for idx, node in enumerate(nodes, start=1):
             name = node["name"]
             node_ssh = {**ssh, **(node.get("ssh") or {})}
-            self.inventory.add_host(name, group="mysql_nodes")
+            self.inventory.add_host(name, group="db_nodes")
             for grp in (
                 f"dc_{group_safe(node['datacenter'])}",
                 f"role_{node['role']}",
                 f"net_{group_safe(node['_network'])}",
             ):
                 self.inventory.add_group(grp)
-                self.inventory.add_child("mysql_nodes", grp)
+                self.inventory.add_child("db_nodes", grp)
                 self.inventory.add_host(name, group=grp)
 
             net = networks[node["_network"]]
@@ -272,7 +289,8 @@ class InventoryModule(BaseInventoryPlugin):
                 "node_datacenter": node["datacenter"],
                 "node_server_id": int(node.get("server_id", idx)),
                 "node_tailscale_ip": node.get("tailscale_ip", ""),
-                "mysql_node_config": node.get("mysql") or {},
+                "mysql_node_config": node.get(section) or {},
+                "db_node_config": node.get(section) or {},
             }
             if node_ssh.get("private_key"):
                 hostvars["ansible_ssh_private_key_file"] = os.path.expanduser(node_ssh["private_key"])
@@ -282,6 +300,52 @@ class InventoryModule(BaseInventoryPlugin):
                 self.inventory.set_variable(name, k, v)
 
     # ------------------------------------------------------------------ #
+    def _engines(self, lab_root):
+        """Engine descriptors from ansible/engines/<engine>/engine.yml, keyed by name."""
+        edir = os.path.join(lab_root, "ansible", "engines")
+        out = {}
+        if not os.path.isdir(edir):
+            raise AnsibleParserError(f"lab_config: engine descriptors missing: {edir}")
+        for sub in sorted(os.listdir(edir)):
+            fname = os.path.join(sub, "engine.yml")
+            if not os.path.isfile(os.path.join(edir, fname)):
+                continue
+            data = self.loader.load_from_file(os.path.join(edir, fname), cache="none")
+            if not isinstance(data, dict) or not data.get("name") or not isinstance(data.get("ha"), dict):
+                raise AnsibleParserError(f"lab_config: {fname} is not a valid engine descriptor (name and ha required)")
+            self._check_descriptor(fname, data)
+            if data["name"] != sub:
+                raise AnsibleParserError(f"lab_config: {fname}: name '{data['name']}' must match its folder '{sub}'")
+            data["_dir"] = os.path.join(edir, sub)
+            out[data["name"]] = data
+        return out
+
+    @staticmethod
+    def _check_descriptor(fname, data):
+        """Fail early on descriptor typos: unknown port names, missing keys."""
+        known = set((data.get("ports") or {}))
+        for key in ("exporter", "collector"):
+            if not data.get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: {key} is required")
+        for key in ("module", "run_as", "connect"):
+            if not (data["collector"] or {}).get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: collector.{key} is required")
+        for key in ("role", "name", "up_metric"):
+            if not (data["exporter"] or {}).get(key):
+                raise AnsibleParserError(f"lab_config: {fname}: exporter.{key} is required")
+        for key in ("primary_port", "exporter_port"):
+            if data.get(key) not in known:
+                raise AnsibleParserError(f"lab_config: {fname}: {key} '{data.get(key)}' is not in ports")
+        for strat, spec in data["ha"].items():
+            for key in ("family", "failover", "min_nodes", "mesh_ports", "client_ports", "provision", "deploy"):
+                if key not in spec:
+                    raise AnsibleParserError(f"lab_config: {fname}: ha.{strat}.{key} is required")
+            tokens = list(spec["mesh_ports"]) + list(spec["client_ports"]) + list(
+                (spec.get("optional_client_ports") or {}).get("ports", []))
+            for token in tokens:
+                if str(token).partition("+")[0] not in known and str(token).partition("+")[0] not in CORE_PORTS:
+                    raise AnsibleParserError(f"lab_config: {fname}: ha.{strat} uses unknown port '{token}'")
+
     def _networks(self, inv, errors):
         raw = inv.get("networks")
         if raw is None:
@@ -317,7 +381,7 @@ class InventoryModule(BaseInventoryPlugin):
             out[str(name)] = {"type": ntype, "interface": iface, "cidrs": cidrs, "encrypted": bool(enc)}
         return out
 
-    def _validate(self, inv, ha, mon, networks, errors, warnings):
+    def _validate(self, inv, ha, mon, networks, engines, engine_name, errors, warnings):
         env = inv.get("environment")
         if not isinstance(env, dict) or not env.get("name"):
             errors.append("inventory.yml: environment.name is required")
@@ -408,16 +472,31 @@ class InventoryModule(BaseInventoryPlugin):
                 if tip in ips:
                     errors.append(f"{where}: duplicate tailscale_ip '{tip}'")
                 ips.add(tip)
-            if node.get("mysql") is not None and not isinstance(node.get("mysql"), dict):
-                errors.append(f"{where}: mysql overrides must be a mapping of my.cnf options")
+            section = (engines.get(engine_name) or {}).get("config_section", "mysql")
+            for key in {"mysql", section}:
+                if node.get(key) is not None and not isinstance(node.get(key), dict):
+                    errors.append(f"{where}: {key} overrides must be a mapping of server options")
             if node.get("ssh") is not None and not isinstance(node.get("ssh"), dict):
                 errors.append(f"{where}: ssh overrides must be a mapping")
 
+        engine = engines.get(engine_name)
         provider = ha.get("ha_provider")
-        if provider not in HA_PROVIDERS:
-            errors.append(f"ha.yml: ha_provider '{provider}' must be one of {sorted(HA_PROVIDERS)}")
+        if engine is None:
+            errors.append(f"ha.yml: db_engine '{engine_name}' must be one of {sorted(engines)}")
+        elif engine.get("status") == "planned":
+            errors.append(f"ha.yml: db_engine '{engine_name}' is planned: its descriptor defines the strategies and "
+                          f"ports, but the roles are not implemented yet. Ready engines: "
+                          f"{sorted(n for n, e in engines.items() if e.get('status') != 'planned')}")
+        elif provider not in engine["ha"]:
+            errors.append(f"ha.yml: ha_provider '{provider}' is not supported by {engine_name}; "
+                          f"choose one of {sorted(s for s, v in engine['ha'].items() if v.get('status') != 'planned')}")
+        elif engine["ha"][provider].get("status") == "planned":
+            errors.append(f"ha.yml: ha_provider '{provider}' is planned for {engine_name}: its descriptor defines it, "
+                          f"but its roles are not implemented yet. Implemented: "
+                          f"{sorted(s for s, v in engine['ha'].items() if v.get('status') != 'planned')}")
         else:
-            lo, hi = HA_PROVIDERS[provider]
+            strategy = engine["ha"][provider]
+            lo, hi = strategy["min_nodes"], strategy.get("max_nodes")
             n = len(nodes)
             if n < lo:
                 warnings.append(f"{provider} needs at least {lo} nodes, inventory has {n}: provisioning, monitoring "
@@ -430,7 +509,7 @@ class InventoryModule(BaseInventoryPlugin):
                     f"inventory.yml: exactly one node must have role 'primary' "
                     f"(initial primary / bootstrap node), found {len(primaries)}"
                 )
-            if provider in ("innodb-cluster", "percona-xtradb-cluster", "orchestrator") and n % 2 == 0:
+            if strategy.get("even_nodes_warning") and n % 2 == 0:
                 warnings.append(f"{provider} with an even node count ({n}) does not improve quorum tolerance")
 
         used = {n.get("_network") for n in nodes if isinstance(n, dict) and n.get("_network") in networks}
@@ -448,20 +527,22 @@ class InventoryModule(BaseInventoryPlugin):
             errors.append(f"ha.yml: percona_xtradb_cluster.encrypt_cluster_traffic cannot be false on unencrypted "
                           f"networks {plain}")
 
-        mysql = ha.get("mysql") or {}
+        section = (engine or {}).get("config_section", "mysql")
+        mysql = ha.get(section) or {}
         ratio = mysql.get("buffer_pool_ratio", 0.5)
         if not isinstance(ratio, (int, float)) or not (0.05 <= float(ratio) <= 0.9):
-            errors.append("ha.yml: mysql.buffer_pool_ratio must be a number between 0.05 and 0.9")
-        if str(mysql.get("version", "8.4")) not in MYSQL_VERSIONS:
-            errors.append(f"ha.yml: mysql.version must be one of {sorted(MYSQL_VERSIONS)}")
-        ports = resolve_ports(ha, mon)
+            errors.append(f"ha.yml: {section}.buffer_pool_ratio must be a number between 0.05 and 0.9")
+        versions = (engine or {}).get("versions") or []
+        if versions and str(mysql.get("version", engine["default_version"])) not in versions:
+            errors.append(f"ha.yml: {section}.version must be one of {versions}")
+        ports = resolve_ports(ha, mon, engine or {})
         for k, v in ports.items():
             if not isinstance(v, int) or isinstance(v, bool) or not (1024 <= v <= 65534):
                 errors.append(f"port '{k}' must be an integer between 1024 and 65534 (got {v!r})")
-        used_ports = [v for v in ports.values() if isinstance(v, int)] + (
-            [ports["router_rw"] + 1] if isinstance(ports["router_rw"], int) else [])
+        spans = {k: int(((engine or {}).get("ports") or {}).get(k, {}).get("span", 1)) for k in ports}
+        used_ports = [v + i for k, v in ports.items() if isinstance(v, int) for i in range(spans[k])]
         if len(set(used_ports)) != len(used_ports):
-            errors.append(f"lab ports must be distinct (router read-only port is rw_port + 1): {ports}")
+            errors.append(f"lab ports must be distinct (a span port reserves the next port too): {ports}")
 
         if mon:
             mode = mon.get("scrape_address", "ip")
@@ -472,7 +553,7 @@ class InventoryModule(BaseInventoryPlugin):
                 errors.append("monitoring.yml: firewall.backend must be nftables, ufw or none")
             if fw and (not fw.get("manage", True) or fw.get("backend") == "none"):
                 warnings.append(
-                    "monitoring.yml: the lab does not manage the firewall; MySQL and exporters listen on all "
+                    "monitoring.yml: the lab does not manage the firewall; the database and exporters listen on all "
                     "interfaces, so restrict them with your own ACLs (make mesh-check still verifies reachability)"
                 )
             for cidr in mon.get("allowed_sources") or []:

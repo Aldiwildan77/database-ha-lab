@@ -1,0 +1,28 @@
+---
+# MariaDB hook for destroy-ha.yml with destroy_data=true. Stops the server, purges its packages,
+# then deletes datadir, config and the lab's apt repository.
+- name: Stop MariaDB
+  ansible.builtin.service:
+    name: mariadb
+    state: stopped
+  failed_when: false
+
+- name: Purge server packages
+  ansible.builtin.apt:
+    name:
+      - mariadb-*
+      - galera-4
+      - maxscale
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Delete datadir, config and repository
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/mysql
+    - /etc/mysql
+    - /etc/apt/preferences.d/mariadb
+    - /etc/apt/sources.list.d/mariadb.sources

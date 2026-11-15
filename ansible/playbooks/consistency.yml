@@ -1,27 +1,20 @@
 ---
 # Dumps the benchmark ledger for one run from every reachable node: -e run_id=<id> -e out_dir=<dir>
 - name: Dump ledger
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   vars:
     db: "{{ lab_benchmark.database | default('halab') }}"
+    # Per-node name: parallel fetches of one shared name can collide in out_dir.
+    ledger_file: "/tmp/halab-ledger-{{ inventory_hostname }}.txt"
   tasks:
-    - name: Export txn_ids for the run
-      ansible.builtin.shell: |
-        set -o pipefail
-        mysql -N -B -e "SELECT txn_id FROM \`{{ db }}\`.ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > /tmp/halab-ledger.txt
-        mysql -N -B -e "SELECT @@gtid_executed; SELECT COUNT(*), COALESCE(SUM(balance), 0) FROM \`{{ db }}\`.accounts" | tr '\t\n' '  '
-      args:
-        executable: /bin/bash
-      register: cs_dump
-      changed_when: false
-      failed_when: false
-      ignore_unreachable: true
+    - name: Export the run's ledger ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/ledger-dump.yml"
 
     - name: Fetch ledger
       ansible.builtin.fetch:
-        src: /tmp/halab-ledger.txt
+        src: "{{ ledger_file }}"
         dest: "{{ out_dir }}/ledger-{{ inventory_hostname }}.txt"
         flat: true
       when: cs_dump.rc | default(1) == 0

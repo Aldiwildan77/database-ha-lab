@@ -6,7 +6,7 @@
 # Ports with no service yet get a temporary listener, so routing and firewall rules are tested
 # before MySQL or the HA software exists.
 - name: Prepare temporary listeners
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   vars:
@@ -73,7 +73,7 @@
       run_once: true
 
 - name: Check node-to-node mesh
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   pre_tasks:
@@ -85,35 +85,14 @@
         host: "{{ hostvars[item.0].node_address }}"
         port: "{{ item.1 }}"
         timeout: 5
-      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) | product(lab_mesh_tcp_ports) | list }}"
+      loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) | product(lab_mesh_tcp_ports) | list }}"
       loop_control:
         label: "{{ inventory_hostname }} -> {{ item.0 }}:{{ item.1 }}"
       register: mesh_tcp
       failed_when: false
 
-    - name: MySQL login to every peer over TLS (replication account, else benchmark account)
-      ansible.builtin.command:
-        argv:
-          - mysql
-          - --protocol=TCP
-          - "--host={{ hostvars[item].node_address }}"
-          - "--port={{ mysql_port }}"
-          - "--user={{ 'repl' if mysql_replication_password | length > 0 else 'bench' }}"
-          - --ssl-mode=REQUIRED
-          - --connect-timeout=5
-          - -N
-          - -e
-          - SELECT CONCAT(@@report_host, ' tls=', IF(VARIABLE_VALUE = '', 'no', VARIABLE_VALUE)) FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_version'
-      environment:
-        MYSQL_PWD: "{{ mysql_replication_password if mysql_replication_password | length > 0 else mysql_benchmark_password }}"
-      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
-      register: mesh_login
-      changed_when: false
-      failed_when: false
-      no_log: true
-      when:
-        - (mysql_replication_password | length > 0) or (mysql_benchmark_password | length > 0)
-        - hostvars[item].mesh_port_state[mysql_port | string] == 'service'
+    - name: Database login to every peer over TLS ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/mesh-login.yml"
 
     - name: Summarise node failures
       ansible.builtin.set_fact:
@@ -123,7 +102,7 @@
           {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item.0 ~ ':' ~ r.item.1 ~ ' TCP unreachable') -%}
           {%- endfor -%}
           {%- for r in mesh_login.results | default([]) if not (r.skipped | default(false)) and r.rc | default(1) != 0 -%}
-          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item ~ ' MySQL login as repl failed: '
+          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item ~ ' database login failed: '
                 ~ (r.stderr | default(r.msg | default('')) | regex_replace('mysql: \\[Warning\\][^\\n]*\\n?', '') | trim)) -%}
           {%- endfor -%}
           {{ out }}
@@ -143,7 +122,7 @@
             host: "{{ lab_node_addresses[item.0] }}"
             port: "{{ item.1 }}"
             timeout: 5
-          loop: "{{ groups['mysql_nodes'] | product(lab_client_tcp_ports + lab_monitoring_tcp_ports) | list }}"
+          loop: "{{ groups['db_nodes'] | product(lab_client_tcp_ports + lab_monitoring_tcp_ports) | list }}"
           loop_control:
             label: "local -> {{ item.0 }}:{{ item.1 }}"
           register: mesh_local
@@ -156,7 +135,7 @@
                         | map(attribute='msg') | list | join(' | ')) or ansible_failed_result.msg | default('check failed') }}
 
 - name: Stop temporary listeners
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: false
   become: true
   tasks:
@@ -174,7 +153,7 @@
     - name: Show results
       ansible.builtin.debug:
         msg: >-
-          node-to-node: {{ (groups['mysql_nodes'] | length) * (groups['mysql_nodes'] | length - 1) }} pairs x
+          node-to-node: {{ (groups['db_nodes'] | length) * (groups['db_nodes'] | length - 1) }} pairs x
           TCP {{ lab_mesh_tcp_ports }}, plus MySQL TLS login where MySQL runs;
           local-to-node: TCP {{ lab_client_tcp_ports + lab_monitoring_tcp_ports }}.
           {{ ('UDP ' ~ lab_mesh_udp_ports ~ ' cannot be verified by TCP connect; confirm those firewall rules manually.') if lab_mesh_udp_ports else '' }}
@@ -186,7 +165,7 @@
         success_msg: "Full mesh OK"
       vars:
         lab_all_failures: >-
-          {{ (groups['mysql_nodes'] | map('extract', hostvars, 'mesh_failures') | select('defined') | flatten)
+          {{ (groups['db_nodes'] | map('extract', hostvars, 'mesh_failures') | select('defined') | flatten)
              + ([mesh_local_error] if mesh_local_error is defined else [])
              + (mesh_local.results | default([]) | selectattr('msg', 'defined')
                 | map(attribute='item') | map('join', ':') | map('regex_replace', '^', 'local -> ')

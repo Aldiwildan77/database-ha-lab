@@ -20,13 +20,13 @@
         print(json.dumps({"addresses": addrs, "in_network": inside}))
       - "{{ hostvars[item].node_address }}"
       - "{{ hostvars[item].node_network_cidrs | to_json }}"
-  loop: "{{ groups['mysql_nodes'] }}"
+  loop: "{{ groups['db_nodes'] }}"
   register: lab_dns
   changed_when: false
 
 - name: Build DNS result map
   ansible.builtin.set_fact:
-    lab_node_dns: "{{ dict(groups['mysql_nodes'] | zip(lab_dns.results | map(attribute='stdout') | map('from_json'))) }}"
+    lab_node_dns: "{{ dict(groups['db_nodes'] | zip(lab_dns.results | map(attribute='stdout') | map('from_json'))) }}"
 
 - name: Assert every address resolves inside its network
   ansible.builtin.assert:
@@ -40,13 +40,13 @@
       {{ 'Check MagicDNS and that the node is online (tailscale status).' if hostvars[item].node_network_type == 'tailscale'
          else 'Check DNS/hosts entries on this machine or use the IP address.' }}
     quiet: true
-  loop: "{{ groups['mysql_nodes'] }}"
+  loop: "{{ groups['db_nodes'] }}"
 
 - name: Build node address map
   ansible.builtin.set_fact:
     lab_node_addresses: >-
       {%- set out = {} -%}
-      {%- for n in groups['mysql_nodes'] -%}
+      {%- for n in groups['db_nodes'] -%}
       {%- if (lab_monitoring.scrape_address | default('ip')) == 'fqdn' -%}
       {%- set _ = out.update({n: hostvars[n].node_address}) -%}
       {%- else -%}

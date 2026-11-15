@@ -1,0 +1,118 @@
+---
+# Engine descriptor: everything the lab core needs to know about a database engine.
+# The core (inventory plugin, provision, deploy-ha, check-host) reads only this file and the roles
+# it names, so a new engine is a new descriptor plus its roles.
+#
+# Port names resolve through lab_ports (config value or lab default). "name+1" is that port plus one.
+name: mysql
+display: MySQL
+config_section: mysql            # ha.yml section for engine settings
+versions: ["8.0", "8.4"]
+default_version: "8.4"
+service: mysql
+process_names: [mysqld]
+helper_processes: [node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
+marker_dir: /etc/mysql           # .ha-lab-managed and .ha-lab-provider live here
+config_file: /etc/mysql/mysql.conf.d/zz-ha-lab.cnf   # lab settings file written by the provisioning role
+
+# Engine ports. default differs from the product standard so the lab can sit next to an existing install.
+#   config: dotted path in ha.yml that overrides the default
+#   span:   consecutive ports reserved (router RW port + 1 for read-only)
+primary_port: mysql             # port clients connect to
+exporter_port: mysql_exporter    # port of the engine metrics exporter
+exporter:
+  role: mysql-exporter           # installs the exporter on every node
+  name: mysqld_exporter
+  up_metric: mysql_up            # 1 when the exporter can reach the database
+collector:
+  module: engine_mysql           # metrics/collectors/<module>.py, loaded by ha_lab_collector.py
+  run_as: mysqld_exporter        # system user that runs the collector and owns its config
+  after: mysql.service
+  connect: {user: exporter, socket: /var/run/mysqld/mysqld.sock}
+ansible_collections: [ansible.mysql]   # needed on this machine by the engine's roles and tasks
+# Engine-specific PromQL used by the report, {d} is the run duration. Optional; neutral metrics are used first.
+report_queries:
+  seconds_behind_source_max:
+    query: "max_over_time(mysql_slave_status_seconds_behind_source[{d}]) or max_over_time(mysql_slave_status_seconds_behind_master[{d}])"
+    unit: s
+paths_written: [/etc/mysql/mysql.conf.d/zz-ha-lab.cnf, /etc/ha-lab, /etc/halab, /opt/ha-lab, /opt/node_exporter-*, /opt/mysqld_exporter-*, /var/lib/node_exporter/textfile]
+ports:
+  mysql: {default: 13306, standard: 3306, config: mysql.port}
+  mysql_exporter: {default: 19104, standard: 9104, config: monitoring.mysql_exporter_port}
+  orchestrator_http: {default: 13000, standard: 3000, config: orchestrator.http_port}
+  orchestrator_raft: {default: 13008, standard: 10008, config: orchestrator.raft_port}
+  router_rw: {default: 16446, standard: 6446, config: innodb_cluster.router.rw_port, span: 2}
+  pxc_sst: {default: 14444, standard: 4444, config: percona_xtradb_cluster.sst_port}
+  pxc_gcomm: {default: 14567, standard: 4567, config: percona_xtradb_cluster.gcomm_port}
+  pxc_ist: {default: 14568, standard: 4568, config: percona_xtradb_cluster.ist_port}
+packages:
+  default: [mysql-server, mysql-client]
+  percona-xtradb-cluster: [percona-xtradb-cluster]
+apt_repository:
+  default: repo.mysql.com (pinned to mysql-* packages only)
+  percona-xtradb-cluster: repo.percona.com
+conflicting_packages:
+  default: [mariadb-server, mariadb-server-core, percona-server-server, percona-xtradb-cluster, mysql-server-8.0, mysql-server-core-8.0]
+  percona-xtradb-cluster: [mariadb-server, mariadb-server-core, percona-server-server, mysql-community-server, mysql-server-8.0, mysql-server-core-8.0]
+
+# HA strategies this engine supports.
+#   family:    replication (source/replica), group (Group Replication) or galera (wsrep)
+#   failover:  who promotes after a failure: manual (make failover), orchestrator, group or galera
+#   provision: roles run by make provision on every node (include_role entries)
+#   deploy:    roles run by make ha, in order
+#   even_nodes_warning: an even node count does not improve quorum tolerance
+#   ha_endpoint: proxy the benchmark's `ha` endpoint uses (else: every node, client picks the writable one)
+ha:
+  async-replication:
+    family: replication
+    failover: manual
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}]
+  semi-sync:
+    family: replication
+    failover: manual
+    semi_sync: true
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}]
+  orchestrator:
+    family: replication
+    failover: orchestrator
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mysql, orchestrator_http, orchestrator_raft]
+    client_ports: [mysql]
+    provision: [{role: mysql}]
+    deploy: [{role: replication}, {role: orchestrator}]
+  innodb-cluster:
+    family: group
+    failover: group
+    min_nodes: 3
+    max_nodes: 9
+    even_nodes_warning: true
+    mesh_ports: [mysql]
+    client_ports: [mysql]
+    optional_client_ports:
+      feature: router
+      ports: [router_rw, router_rw+1]
+    ha_endpoint: {feature: router, port: router_rw, target: mysql-router, mode: first-available}
+    provision: [{role: mysql}]
+    deploy: [{role: innodb-cluster}]
+  percona-xtradb-cluster:
+    family: galera
+    failover: galera
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [mysql, pxc_sst, pxc_gcomm, pxc_ist]
+    client_ports: [mysql]
+    provision: [{role: percona-xtradb-cluster}, {role: percona-xtradb-cluster, tasks_from: cluster}]
+    deploy: [{role: percona-xtradb-cluster, tasks_from: cluster}]

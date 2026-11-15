@@ -125,7 +125,7 @@
     },
     {
       "type": "stat",
-      "title": "MySQL up",
+      "title": "Database up",
       "id": 2,
       "datasource": {
         "type": "prometheus",
@@ -254,7 +254,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "up{job=\"mysqld\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
+          "expr": "up{job=\"db\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}",
           "legendFormat": "{{node}}"
         }
       ],

@@ -1,0 +1,67 @@
+---
+# Roles are cluster-wide and replicate, so they are created once on the node that is a primary.
+# Standbys get them through replication; run provisioning against a primary to change them.
+- name: Create lab roles and database
+  become: true
+  become_user: postgres
+  module_defaults:
+    group/community.postgresql.all: "{{ pg_conn }}"
+  block:
+    - name: Create exporter role
+      community.postgresql.postgresql_user:
+        name: "{{ pg_exporter_user }}"
+        password: "{{ db_exporter_password }}"
+        role_attr_flags: LOGIN
+        conn_limit: 5
+      no_log: true
+      when: monitoring_enabled | bool
+
+    - name: Let the exporter role read monitoring views
+      community.postgresql.postgresql_query:
+        query: "GRANT pg_monitor TO {{ pg_exporter_user }}"
+      changed_when: false
+      when: monitoring_enabled | bool
+
+    - name: Create replication role
+      community.postgresql.postgresql_user:
+        name: "{{ pg_replication_user }}"
+        password: "{{ db_replication_password }}"
+        role_attr_flags: LOGIN,REPLICATION
+      no_log: true
+      when: db_replication_password | length > 0
+
+    - name: Create benchmark role
+      community.postgresql.postgresql_user:
+        name: "{{ pg_benchmark_user }}"
+        password: "{{ db_benchmark_password }}"
+        role_attr_flags: LOGIN
+      no_log: true
+      when: db_benchmark_password | length > 0
+
+    - name: Create benchmark database
+      community.postgresql.postgresql_db:
+        name: "{{ pg_benchmark_database }}"
+        owner: "{{ pg_benchmark_user }}"
+        template: template0
+        encoding: UTF8
+        lc_collate: C.UTF-8
+        lc_ctype: C.UTF-8
+      when: db_benchmark_password | length > 0
+
+    - name: Create pg_rewind role
+      community.postgresql.postgresql_user:
+        name: "{{ pg_rewind_user }}"
+        password: "{{ db_admin_password }}"
+        role_attr_flags: LOGIN
+      no_log: true
+      when: db_admin_password | length > 0
+
+    - name: Allow the pg_rewind role to read the source's files
+      community.postgresql.postgresql_query:
+        query:
+          - "GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO {{ pg_rewind_user }}"
+          - "GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO {{ pg_rewind_user }}"
+          - "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO {{ pg_rewind_user }}"
+          - "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO {{ pg_rewind_user }}"
+      changed_when: false
+      when: db_admin_password | length > 0

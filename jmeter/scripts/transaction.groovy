@@ -10,6 +10,7 @@ if (LabDb == null) {
     vars.putObject('LabDb', LabDb)
 }
 
+def D = LabDb.dialect(props)
 long t0 = System.nanoTime()
 double readRatio = Double.parseDouble(props.getProperty('read_ratio', args ? args[0] : '0.5'))
 int rows = Integer.parseInt(props.getProperty('rows', '100000'))
@@ -52,7 +53,7 @@ try {
         ins.setLong(5, System.currentTimeMillis()); ins.setString(6, c.servedBy); ins.setString(7, 'w' * 64)
         ins.executeUpdate(); ins.close()
         PreparedStatement up = conn.prepareStatement(
-            'UPDATE accounts SET balance = balance + 1, updated_at = NOW(6) WHERE id = ?')
+            "UPDATE accounts SET balance = balance + 1, updated_at = ${D.now()} WHERE id = ?".toString())
         up.setLong(1, rnd.nextLong(1, rows + 1)); up.executeUpdate(); up.close()
     }
     execNs = System.nanoTime() - e0
@@ -62,7 +63,7 @@ try {
     commitNs = System.nanoTime() - k0
     SampleResult.setSuccessful(true)
 } catch (Throwable t) {
-    errClass = LabDb.classify(t)
+    errClass = LabDb.classify(t, D)
     // Connection lost during COMMIT: the server may or may not have committed.
     if (commitSent && errClass in ['connection', 'timeout']) errClass = 'commit_unknown'
     msg = (t.getMessage() ?: t.class.simpleName).replaceAll('\\s+', ' ').take(200)

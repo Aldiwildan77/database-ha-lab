@@ -17,9 +17,9 @@ scrape_configs:
     file_sd_configs:
       - files: [/etc/prometheus/targets/node.json]
 
-  - job_name: mysqld
+  - job_name: db
     file_sd_configs:
-      - files: [/etc/prometheus/targets/mysqld.json]
+      - files: [/etc/prometheus/targets/db.json]
 
   - job_name: halab
     file_sd_configs:

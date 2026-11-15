@@ -1,0 +1,24 @@
+---
+# PostgreSQL hook for check-mesh.yml: logs in to every peer over TLS. Registers mesh_login (results with rc).
+# The replication account opens a walsender connection (IDENTIFY_SYSTEM); without it the benchmark account runs a query.
+- name: Login to every peer over TLS (replication account, else benchmark account)
+  ansible.builtin.command:
+    argv:
+      - psql
+      - "host={{ hostvars[item].node_address }} port={{ pg_port }} user={{ pg_replication_user if db_replication_password | length > 0 else pg_benchmark_user }}
+        dbname={{ 'replication' if db_replication_password | length > 0 else 'postgres' }} sslmode=require connect_timeout=5
+        {{ 'replication=true' if db_replication_password | length > 0 else '' }}"
+      - --no-psqlrc
+      - --tuples-only
+      - --no-align
+      - --command={{ 'IDENTIFY_SYSTEM' if db_replication_password | length > 0 else 'SELECT inet_server_addr()' }}
+  environment:
+    PGPASSWORD: "{{ db_replication_password if db_replication_password | length > 0 else db_benchmark_password }}"
+  loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
+  register: mesh_login
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - (db_replication_password | length > 0) or (db_benchmark_password | length > 0)
+    - hostvars[item].mesh_port_state[db_port | string] == 'service'

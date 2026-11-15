@@ -1,0 +1,79 @@
+---
+# PostgreSQL engine descriptor. A strategy with status: planned is refused at validate time until its roles exist.
+name: postgres
+display: PostgreSQL
+status: ready
+config_section: postgres
+versions: ["16", "17", "18"]
+default_version: "17"
+service: postgresql
+process_names: [postgres]
+helper_processes: [node_exporter, postgres_exporter, python3, patroni, etcd]
+marker_dir: /etc/postgresql
+primary_port: postgres
+exporter_port: postgres_exporter
+exporter:
+  role: postgres-exporter
+  name: postgres_exporter
+  up_metric: pg_up
+collector:
+  module: engine_postgres
+  run_as: postgres_exporter
+  after: postgresql.service
+  connect: {user: exporter, host: /var/run/postgresql}
+ansible_collections: [community.postgresql]
+ports:
+  postgres: {default: 15432, standard: 5432, config: postgres.port}
+  postgres_exporter: {default: 19187, standard: 9187, config: monitoring.postgres_exporter_port}
+  patroni_rest: {default: 18008, standard: 8008, config: patroni.rest_port}
+  etcd_client: {default: 12379, standard: 2379, config: patroni.etcd_client_port}
+  etcd_peer: {default: 12380, standard: 2380, config: patroni.etcd_peer_port}
+packages:
+  default: [postgresql-common, "postgresql-<version>", "postgresql-client-<version>", python3-psycopg2, ssl-cert, acl]
+apt_repository:
+  default: apt.postgresql.org (PGDG, pinned to postgresql-* packages only)
+conflicting_packages:
+  default: []
+paths_written:
+  - /etc/postgresql/<version>/halab
+  - /var/lib/postgresql/<version>/halab
+  - /etc/postgresql/.ha-lab-managed
+  - /etc/ha-lab
+  - /etc/halab
+  - /opt/ha-lab
+  - /opt/node_exporter-*
+  - /opt/postgres_exporter-*
+  - /var/lib/node_exporter/textfile
+
+# Replication uses LSNs, not GTIDs, so topology, promotion and RPO measurement need their own code.
+ha:
+  streaming-replication:
+    family: replication
+    failover: manual
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [postgres]
+    client_ports: [postgres]
+    provision: [{role: postgres}]
+    deploy: [{role: postgres-replication}]
+  sync-replication:
+    family: replication
+    failover: manual
+    synchronous: true
+    min_nodes: 2
+    max_nodes: null
+    mesh_ports: [postgres]
+    client_ports: [postgres]
+    provision: [{role: postgres}]
+    deploy: [{role: postgres-replication}]
+  patroni:
+    status: planned
+    family: replication
+    failover: patroni
+    min_nodes: 3
+    max_nodes: null
+    even_nodes_warning: true
+    mesh_ports: [postgres, patroni_rest, etcd_client, etcd_peer]
+    client_ports: [postgres, patroni_rest]
+    provision: [{role: postgres}]
+    deploy: [{role: etcd}, {role: patroni}]

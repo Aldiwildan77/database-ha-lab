@@ -1,15 +1,11 @@
 ---
 - name: Collect node information
-  hosts: mysql_nodes
+  hosts: db_nodes
   gather_facts: true
   become: true
   tasks:
-    - name: Read MySQL version
-      ansible.mysql.mysql_info:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        filter: [version]
-      register: info_mysql
-      failed_when: false
+    - name: Read server version ({{ db_engine }})
+      ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/server-version.yml"
 
     - name: Read chrony tracking
       ansible.builtin.command: chronyc -c tracking
@@ -43,7 +39,8 @@
           interface: "{{ node_interface }}"
           interface_ipv4: "{{ (ansible_facts[node_interface | replace('-', '_')] | default({})).ipv4.address | default('') }}"
           tailscale_ips: "{{ info_ts.stdout_lines | default([]) }}"
-          mysql_version: "{{ info_mysql.version.full | default('not installed') }}"
+          db_engine: "{{ db_engine }}"
+          db_version: "{{ lab_db_version | default('not installed') }}"
           clock_synced: "{{ (info_chrony.stdout.split(','))[13] | default('') | trim == 'Normal' }}"
           clock_offset_seconds: "{{ (info_chrony.stdout.split(','))[4] | default('n/a') }}"
           collected_at: "{{ ansible_date_time.iso8601 }}"
@@ -57,8 +54,8 @@
       ansible.builtin.copy:
         dest: "{{ lab_root }}/local/state/node-info.json"
         mode: "0644"
-        content: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'node_info') | list | to_nice_json }}\n"
+        content: "{{ groups['db_nodes'] | map('extract', hostvars, 'node_info') | list | to_nice_json }}\n"
 
     - name: Show node information
       ansible.builtin.debug:
-        msg: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'node_info') | list }}"
+        msg: "{{ groups['db_nodes'] | map('extract', hostvars, 'node_info') | list }}"

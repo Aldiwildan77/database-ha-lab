@@ -1,0 +1,21 @@
+---
+# MariaDB hook for failover.yml (manual failover). Rescue path: makes the old primary writable again when no candidate was chosen.
+- name: Unfence the old primary after a failed switchover
+  ansible.mysql.mysql_query:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    query: SET GLOBAL read_only = 0
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'switchover' and (fo_new_primary | default('')) == ''
+
+- name: Persist the unfence
+  community.general.ini_file:
+    path: /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+    section: mariadbd
+    option: read_only
+    value: "0"
+    no_extra_spaces: false
+    mode: "0644"
+  delegate_to: "{{ old_primary }}"
+  run_once: true
+  when: failover_mode == 'switchover' and (fo_new_primary | default('')) == ''
