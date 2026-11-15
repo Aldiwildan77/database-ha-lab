@@ -23,6 +23,8 @@ mysql_base_config:
   report_host: "{{ node_fqdn }}"
   port: "{{ mysql_port }}"
   bind_address: "*"
+  # X Protocol (33060) is unused by the lab; off so only mysql.port is opened.
+  mysqlx: "OFF"
   skip_name_resolve: "ON"
   max_connections: 500
   gtid_mode: "ON"
