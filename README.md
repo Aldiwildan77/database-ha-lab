@@ -113,7 +113,7 @@ nodes:
 
 ```text
 Configuration   make init | deps | validate | validate-local | validate-config
-Infrastructure  make provision | configure-exporters | collect-info
+Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha HA=<provider> | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
@@ -131,6 +131,12 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 
 ## Safety
 
+- **Existing services are protected.** `make plan-host` is read-only. For each node it shows the packages, services, users, paths and ports the lab would add, and `make provision` runs it first. Provisioning stops before changing anything if:
+  - a lab port is already in use (it names the process);
+  - MariaDB or another MySQL server is installed;
+  - the InnoDB buffer pool would not fit in available memory (set `mysql.buffer_pool_ratio`, e.g. 0.25, on shared servers).
+
+  An existing ntp, ntpsec or openntpd is kept, and chrony is installed only when none of them is present. The repo.mysql.com pin applies to `mysql-*` packages only.
 - **Existing data is protected.** Provisioning refuses to touch a MySQL datadir that the lab did not create. The lab marks its own datadirs with `/etc/mysql/.ha-lab-managed`. To take over an existing server anyway, pass `ARGS="-e mysql_adopt_existing=true"`. This changes its config and restarts it. It never deletes data.
 - **Topology switches are explicit.** `make ha HA=x` refuses to run when `x` differs from `ha_provider` in `config/ha.yml`. Nodes record their deployed provider in `/etc/mysql/.ha-lab-provider`, and deployment refuses a different provider until you run `make destroy`.
 - **Replication refuses errant GTIDs.** A replica that holds transactions the primary lacks is never attached. A switchover fences the old primary before it promotes the new one, and unfences it automatically if the promotion fails.

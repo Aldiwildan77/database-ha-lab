@@ -403,6 +403,9 @@ class InventoryModule(BaseInventoryPlugin):
                           f"networks {plain}")
 
         mysql = ha.get("mysql") or {}
+        ratio = mysql.get("buffer_pool_ratio", 0.5)
+        if not isinstance(ratio, (int, float)) or not (0.05 <= float(ratio) <= 0.9):
+            errors.append("ha.yml: mysql.buffer_pool_ratio must be a number between 0.05 and 0.9")
         if str(mysql.get("version", "8.4")) not in MYSQL_VERSIONS:
             errors.append(f"ha.yml: mysql.version must be one of {sorted(MYSQL_VERSIONS)}")
         ports = {}

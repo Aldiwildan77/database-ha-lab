@@ -9,6 +9,9 @@
     - name: Check local Tailscale, DNS and reachability
       ansible.builtin.import_tasks: ../tasks/preflight-local.yml
 
+- name: Host impact check (read-only; stops on conflicts)
+  ansible.builtin.import_playbook: check-host.yml
+
 - name: Provision MySQL nodes
   hosts: mysql_nodes
   gather_facts: false
@@ -58,6 +61,7 @@
       ansible.builtin.command: chronyc -c tracking
       register: summary_chrony
       changed_when: false
+      failed_when: false
 
     - name: Show summary
       ansible.builtin.debug:

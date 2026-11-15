@@ -49,7 +49,7 @@
     dest: /etc/apt/preferences.d/mysql
     mode: "0644"
     content: |
-      Package: *
+      Package: mysql-*
       Pin: origin repo.mysql.com
       Pin-Priority: 1001
 

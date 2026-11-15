@@ -9,9 +9,24 @@
       Supported: {{ common_supported_os | to_json }}
     quiet: true
 
+- name: Read installed packages
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${db:Status-Abbrev}${Package}\\n"]
+  register: common_dpkg
+  changed_when: false
+
+- name: Decide time synchronisation
+  ansible.builtin.set_fact:
+    common_keep_time_daemon: >-
+      {{ common_other_time_daemons
+         | select('in', common_dpkg.stdout_lines | select('match', '^ii') | map('regex_replace', '^ii\\s+', '') | list)
+         | list | length > 0 }}
+
 - name: Install base packages
   ansible.builtin.apt:
-    name: "{{ common_packages }}"
+    name: >-
+      {{ common_packages + ([] if common_keep_time_daemon else ['chrony'])
+         + (['ufw'] if common_firewall_backend == 'ufw' else []) }}
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -21,6 +36,7 @@
     name: chrony
     state: started
     enabled: true
+  when: not common_keep_time_daemon
 
 - name: Configure firewall (nftables lab table)
   ansible.builtin.import_tasks: firewall-nftables.yml

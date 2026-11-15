@@ -14,7 +14,9 @@ mysql_marker_file: /etc/mysql/.ha-lab-managed
 # Set true to let the lab take over a MySQL datadir it did not create.
 mysql_adopt_existing: false
 
-mysql_buffer_pool_mb: "{{ [128, (ansible_memtotal_mb * 0.5) | int] | max }}"
+# Fraction of total RAM; lower it (e.g. 0.25) on servers shared with other services.
+mysql_buffer_pool_ratio: "{{ (lab_ha.mysql | default({})).buffer_pool_ratio | default(0.5) | float }}"
+mysql_buffer_pool_mb: "{{ [128, (ansible_memtotal_mb * mysql_buffer_pool_ratio) | int] | max }}"
 
 mysql_base_config:
   server_id: "{{ node_server_id }}"

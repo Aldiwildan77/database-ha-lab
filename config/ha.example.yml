@@ -7,6 +7,7 @@ ha_provider: async-replication
 mysql:
   version: "8.4"   # "8.4" or "8.0"
   port: 3306
+  buffer_pool_ratio: 0.5   # share of RAM for InnoDB; use 0.25 or less on servers running other services
   config: {}       # extra my.cnf [mysqld] options for all nodes
 
 monitoring:

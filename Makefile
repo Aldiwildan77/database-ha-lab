@@ -14,7 +14,7 @@ CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
-.PHONY: help init deps validate validate-local validate-config provision configure-exporters collect-info \
+.PHONY: help init deps validate validate-local validate-config plan-host provision configure-exporters collect-info \
         targets monitoring monitoring-stop monitoring-status metrics-check mesh-check network-check network-matrix \
         probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
         dashboards benchmark failover report status destroy lint
@@ -43,7 +43,10 @@ validate: validate-config ## Validate local tools, config, secrets, Tailscale, D
 	$(ansible) ansible/playbooks/validate.yml
 
 # ---------------------------------------------------------------- Infrastructure
-provision: validate-config ## Install MySQL (or PXC) + exporters + collectors on all nodes
+plan-host: validate-config ## Read-only: what provisioning would change on each node, and conflicts
+	$(ansible) ansible/playbooks/check-host.yml
+
+provision: validate-config ## Install MySQL (or PXC) + exporters + collectors on all nodes (runs plan-host first)
 	$(ansible) ansible/playbooks/provision.yml
 
 configure-exporters: validate-config ## (Re)install exporters and lab collectors only

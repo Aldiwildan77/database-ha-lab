@@ -1,0 +1,128 @@
+---
+# Read-only host impact check. Changes nothing. Shows what provisioning would add to each node and
+# refuses (fails) when it would collide with something already running there.
+#   make plan-host            (also runs automatically at the start of make provision)
+- name: Host impact plan
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  vars:
+    lab_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports + lab_monitoring_tcp_ports) | map('int') | unique | sort }}"
+    lab_processes: [mysqld, node_exporter, mysqld_exporter, python3, orchestrator, mysqlrouter]
+    pxc: "{{ ha_provider == 'percona-xtradb-cluster' }}"
+    conflicting_packages: >-
+      {{ ['mariadb-server', 'mariadb-server-core', 'percona-server-server', 'percona-xtradb-cluster', 'mysql-server-8.0', 'mysql-server-core-8.0']
+         if not pxc else ['mariadb-server', 'mariadb-server-core', 'percona-server-server', 'mysql-community-server', 'mysql-server-8.0', 'mysql-server-core-8.0'] }}
+    other_time_daemons: [ntp, ntpsec, openntpd]
+    buffer_ratio: "{{ (lab_ha.mysql | default({})).buffer_pool_ratio | default(0.5) | float }}"
+  tasks:
+    - name: Gather fresh facts (never from cache)
+      ansible.builtin.setup:
+
+    - name: Read installed packages
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${db:Status-Abbrev}${Package}\\n"]
+      register: host_dpkg
+      changed_when: false
+
+    - name: Index installed packages
+      ansible.builtin.set_fact:
+        host_packages: "{{ host_dpkg.stdout_lines | select('match', '^ii') | map('regex_replace', '^ii\\s+', '') | list }}"
+
+    - name: Read listening TCP sockets
+      ansible.builtin.command: ss -ltnpH
+      register: host_ss
+      changed_when: false
+
+    - name: Read lab ownership markers
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: [/etc/mysql/.ha-lab-managed, /etc/systemd/system/node_exporter.service]
+      register: host_markers
+
+    - name: Read available memory
+      ansible.builtin.command: awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo
+      register: host_memavail
+      changed_when: false
+
+    - name: Read service states
+      ansible.builtin.service_facts:
+
+    - name: Evaluate
+      ansible.builtin.set_fact:
+        host_lab_managed: "{{ host_markers.results[0].stat.exists }}"
+        host_listeners: >-
+          {%- set out = {} -%}
+          {%- for line in host_ss.stdout_lines -%}
+          {%- set cols = line.split() -%}
+          {%- set port = (cols[3] | regex_replace('^.*:', '')) | int -%}
+          {%- set proc = (line | regex_search('users:\\(\\(\"([^\"]+)\"', '\\1') or ['?']) | first -%}
+          {%- if port in lab_ports -%}{%- set _ = out.update({port: proc}) -%}{%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+        host_planned_pool_mb: >-
+          {{ ((lab_ha.mysql | default({})).config | default({})).innodb_buffer_pool_size
+             | default(mysql_node_config.innodb_buffer_pool_size | default(none), true)
+             | default(((ansible_memtotal_mb * buffer_ratio) | int) ~ 'M', true)
+             | human_to_bytes(default_unit='B') // 1048576 }}
+
+    - name: Build conflicts
+      ansible.builtin.set_fact:
+        host_conflicts: >-
+          {%- set c = [] -%}
+          {%- for p in conflicting_packages if p in host_packages and not host_lab_managed -%}
+          {%- set _ = c.append('package ' ~ p ~ ' is installed (another MySQL/MariaDB server)') -%}
+          {%- endfor -%}
+          {%- for port, proc in host_listeners.items() -%}
+          {%- if not (host_lab_managed and proc in lab_processes) -%}
+          {%- set _ = c.append('port ' ~ port ~ ' is already used by ' ~ proc) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if not host_lab_managed and (host_planned_pool_mb | int + 512) > (host_memavail.stdout | int) -%}
+          {%- set _ = c.append('innodb_buffer_pool_size ' ~ host_planned_pool_mb ~ ' MB + 512 MB does not fit in '
+                ~ host_memavail.stdout ~ ' MB available; set mysql.buffer_pool_ratio or innodb_buffer_pool_size') -%}
+          {%- endif -%}
+          {{ c }}
+        host_plan:
+          node: "{{ inventory_hostname }}"
+          already_lab_managed: "{{ host_lab_managed }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }}"
+          memory_available_mb: "{{ host_memavail.stdout | int }}"
+          mysql_buffer_pool_mb: "{{ host_planned_pool_mb }}"
+          apt_repository: "{{ 'repo.percona.com (' ~ ha_provider ~ ')' if pxc else 'repo.mysql.com (pinned to mysql-* packages only)' }}"
+          packages_to_install: >-
+            {{ (['ca-certificates', 'curl', 'gnupg', 'python3-debian', 'python3-pymysql', 'nftables', 'iperf3', 'mtr-tiny',
+                 'iputils-ping', 'sysstat', 'jq']
+                + ([] if other_time_daemons | select('in', host_packages) | list else ['chrony'])
+                + (['ufw'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'ufw' else [])
+                + (['percona-xtradb-cluster'] if pxc else ['mysql-server', 'mysql-client']))
+               | reject('in', host_packages) | list }}
+          time_sync: >-
+            {{ 'keep existing ' ~ (other_time_daemons | select('in', host_packages) | join(', '))
+               if other_time_daemons | select('in', host_packages) | list
+               else 'chrony (replaces systemd-timesyncd if present)' }}
+          services_added: >-
+            {{ ['mysql', 'node_exporter', 'mysqld_exporter', 'ha-lab-collector', 'ha-lab-network-probe.timer']
+               + (['halab-firewall'] if (lab_monitoring.firewall | default({})).backend | default('nftables') == 'nftables' else []) }}
+          system_users_added: [node_exporter, mysqld_exporter]
+          paths_written: [/etc/mysql/mysql.conf.d/zz-ha-lab.cnf, /etc/ha-lab, /etc/halab, /opt/ha-lab, /opt/node_exporter-*, /opt/mysqld_exporter-*, /var/lib/node_exporter/textfile]
+          lab_ports: "{{ lab_ports }}"
+          ports_in_use_now: "{{ host_listeners }}"
+          firewall: >-
+            {{ (lab_monitoring.firewall | default({})).backend | default('nftables') }} on {{ node_interface }}
+            (running now: {{ ['ufw', 'firewalld', 'nftables', 'docker']
+                             | select('in', ansible_facts.services | default({}) | dict2items
+                                       | selectattr('value.state', 'equalto', 'running')
+                                       | map(attribute='key') | map('regex_replace', '\\.service$', '') | list)
+                             | list }})
+          restarts: mysqld only when its lab config changes; existing services are not restarted
+
+    - name: Show plan
+      ansible.builtin.debug:
+        var: host_plan
+
+    - name: Refuse conflicting hosts
+      ansible.builtin.assert:
+        that: host_conflicts | length == 0
+        fail_msg: "{{ inventory_hostname }} would conflict with existing services: {{ host_conflicts | join('; ') }}"
+        success_msg: "{{ inventory_hostname }}: no conflicts"
