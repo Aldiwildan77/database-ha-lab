@@ -423,10 +423,12 @@ class InventoryModule(BaseInventoryPlugin):
             if mode not in ("ip", "fqdn"):
                 errors.append("monitoring.yml: scrape_address must be 'ip' or 'fqdn'")
             fw = mon.get("firewall") or {}
-            if fw and not fw.get("manage", True):
+            if fw.get("backend", "nftables") not in ("nftables", "ufw", "none"):
+                errors.append("monitoring.yml: firewall.backend must be nftables, ufw or none")
+            if fw and (not fw.get("manage", True) or fw.get("backend") == "none"):
                 warnings.append(
-                    "monitoring.yml: firewall.manage is false; MySQL and exporters listen on all "
-                    "interfaces, so you must restrict them yourself"
+                    "monitoring.yml: the lab does not manage the firewall; MySQL and exporters listen on all "
+                    "interfaces, so restrict them with your own ACLs (make mesh-check still verifies reachability)"
                 )
             for cidr in mon.get("allowed_sources") or []:
                 try:

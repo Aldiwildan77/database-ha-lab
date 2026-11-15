@@ -28,7 +28,7 @@
 - `innodb_buffer_pool_size` defaults to 50% of RAM; override for small nodes.
 - Disk latency on the Host dashboard is a derived mean from `/proc/diskstats`, not a distribution. Histograms arrive with Phase 5 collectors.
 - Clock offset (`node_timex_offset_seconds`, chrony) is recorded but cross-node timestamp subtraction remains uncertain by at least that offset.
-- ufw rules assume the iptables/nftables backend that ufw manages; review interactions if you run other firewall tooling.
+- The default nftables table only adds drops for lab ports. Your other tables still apply, so lab ports must not be blocked by them. `make mesh-check` detects that.
 
 ## Supported versions
 

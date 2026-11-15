@@ -27,9 +27,9 @@ If `networks` is omitted, every node is on one Tailscale network. That is the or
 | Treated as encrypted | yes | yes | **no** |
 
 On every network type:
-- **Firewall (ufw):** lab ports are allowed on the node's interface. The allowed sources are every used network's `cidrs` plus `monitoring.yml` `allowed_sources`.
+- **Firewall (nftables `inet halab` by default):** lab ports are accepted on the node's interface from every used network's `cidrs` plus `monitoring.yml` `allowed_sources`, and dropped from anywhere else. Other ports and rules are untouched.
 - **MySQL account hosts:** the lab creates one account per IPv4 CIDR above, as a `net/mask` host pattern.
-- **Faults:** `isolate` and `netem` act on the node's interface.
+- **Faults:** `isolate` (its own nftables table, `inet halab_fault`) and `netem` act on the node's interface.
 
 ### Private networks get TLS enforced
 

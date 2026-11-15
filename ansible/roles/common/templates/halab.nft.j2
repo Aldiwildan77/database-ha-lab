@@ -1,0 +1,44 @@
+#!/usr/sbin/nft -f
+# Managed by mysql-ha-lab (Ansible). Guards lab ports only; other traffic and other tables are untouched.
+# Remove with: systemctl disable --now halab-firewall && nft delete table inet halab
+{% set v4 = common_firewall_allowed_sources | reject('search', ':') | list %}
+{% set v6 = common_firewall_allowed_sources | select('search', ':') | list %}
+table inet halab {}
+delete table inet halab
+
+table inet halab {
+{% if v4 %}
+  set allowed_v4 {
+    type ipv4_addr
+    flags interval
+    elements = { {{ v4 | join(', ') }} }
+  }
+{% endif %}
+{% if v6 %}
+  set allowed_v6 {
+    type ipv6_addr
+    flags interval
+    elements = { {{ v6 | join(', ') }} }
+  }
+{% endif %}
+
+  chain input {
+    type filter hook input priority filter - 10; policy accept;
+    iifname "lo" accept
+    tcp dport { {{ common_firewall_tcp_ports | join(', ') }} } jump lab_ports
+{% if common_firewall_udp_ports %}
+    udp dport { {{ common_firewall_udp_ports | join(', ') }} } jump lab_ports
+{% endif %}
+  }
+
+  chain lab_ports {
+    ct state established,related accept
+{% if v4 %}
+    iifname "{{ node_interface }}" ip saddr @allowed_v4 accept
+{% endif %}
+{% if v6 %}
+    iifname "{{ node_interface }}" ip6 saddr @allowed_v6 accept
+{% endif %}
+    counter drop
+  }
+}

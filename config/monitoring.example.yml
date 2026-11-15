@@ -9,8 +9,11 @@ scrape_address: ip
 allowed_sources: []
 
 firewall:
-  manage: true
-  ssh_allow_all_interfaces: true   # false = SSH only on the node's lab interface; lockout risk otherwise
+  # nftables: lab-owned table `inet halab` guarding only lab ports; other rules untouched (default)
+  # ufw:      host-wide default-deny incoming via ufw
+  # none:     the lab does not touch the firewall; you enforce ACLs
+  backend: nftables
+  ssh_allow_all_interfaces: true   # ufw only: false = SSH only on the lab interface
 
 exporters:
   node_exporter:

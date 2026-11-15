@@ -22,6 +22,10 @@
     state: started
     enabled: true
 
-- name: Configure firewall
-  ansible.builtin.import_tasks: firewall.yml
-  when: common_firewall_manage | bool
+- name: Configure firewall (nftables lab table)
+  ansible.builtin.import_tasks: firewall-nftables.yml
+  when: common_firewall_backend == 'nftables'
+
+- name: Configure firewall (ufw)
+  ansible.builtin.import_tasks: firewall-ufw.yml
+  when: common_firewall_backend == 'ufw'

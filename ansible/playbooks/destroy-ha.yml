@@ -158,6 +158,13 @@
         purge: true
         autoremove: true
 
+    - name: Remove lab firewall table
+      ansible.builtin.systemd_service:
+        name: halab-firewall
+        state: stopped
+        enabled: false
+      failed_when: false
+
     - name: Delete datadir, config and markers
       ansible.builtin.file:
         path: "{{ item }}"
@@ -168,3 +175,5 @@
         - /etc/mysql
         - /etc/mysqlrouter
         - /etc/apt/preferences.d/mysql
+        - /etc/halab
+        - /etc/systemd/system/halab-firewall.service

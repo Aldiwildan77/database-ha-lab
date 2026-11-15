@@ -1,0 +1,16 @@
+[Unit]
+Description=mysql-ha-lab nftables table (lab ports only)
+Wants=network-pre.target
+Before=network-pre.target mysql.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f {{ common_nft_file }}
+ExecReload=/usr/sbin/nft -f {{ common_nft_file }}
+ExecStop=/usr/sbin/nft delete table inet halab
+
+[Install]
+WantedBy=multi-user.target

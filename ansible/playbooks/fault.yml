@@ -42,16 +42,23 @@
     - name: Isolate database traffic (SSH and exporters stay reachable)
       ansible.builtin.shell: |
         set -e
-        iptables -N HALAB_FAULT 2>/dev/null || iptables -F HALAB_FAULT
-        for p in {{ fault_ports | join(' ') }}; do
-          iptables -A HALAB_FAULT -i {{ node_interface }} -p tcp --dport "$p" -j DROP
-          iptables -A HALAB_FAULT -o {{ node_interface }} -p tcp --dport "$p" -j DROP
-          iptables -A HALAB_FAULT -o {{ node_interface }} -p tcp --sport "$p" -j DROP
-        done
-        iptables -A HALAB_FAULT -p udp --dport 4567 -j DROP
-        iptables -C INPUT -j HALAB_FAULT 2>/dev/null || iptables -I INPUT -j HALAB_FAULT
-        iptables -C OUTPUT -j HALAB_FAULT 2>/dev/null || iptables -I OUTPUT -j HALAB_FAULT
-        systemd-run --unit halab-fault-autorestore --on-active={{ max_seconds }} iptables -F HALAB_FAULT || true
+        nft -f - <<'NFT'
+        table inet halab_fault {}
+        delete table inet halab_fault
+        table inet halab_fault {
+          chain input {
+            type filter hook input priority filter - 20; policy accept;
+            iifname "{{ node_interface }}" tcp dport { {{ fault_ports | join(', ') }} } drop
+            iifname "{{ node_interface }}" udp dport 4567 drop
+          }
+          chain output {
+            type filter hook output priority filter - 20; policy accept;
+            oifname "{{ node_interface }}" tcp dport { {{ fault_ports | join(', ') }} } drop
+            oifname "{{ node_interface }}" tcp sport { {{ fault_ports | join(', ') }} } drop
+          }
+        }
+        NFT
+        systemd-run --unit halab-fault-autorestore --on-active={{ max_seconds }} nft delete table inet halab_fault || true
       args:
         executable: /bin/bash
       changed_when: true
@@ -59,7 +66,7 @@
 
     - name: Remove isolation
       ansible.builtin.shell: |
-        iptables -F HALAB_FAULT 2>/dev/null || true
+        nft delete table inet halab_fault 2>/dev/null || true
         systemctl stop halab-fault-autorestore.timer 2>/dev/null || true
       args:
         executable: /bin/bash

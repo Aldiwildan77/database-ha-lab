@@ -11,6 +11,7 @@ common_packages:
   - python3-pymysql
   - chrony
   - ufw
+  - nftables
   - iperf3
   - mtr-tiny
   - iputils-ping
@@ -18,6 +19,10 @@ common_packages:
   - jq
 
 common_firewall_manage: "{{ (lab_monitoring.firewall | default({})).manage | default(true) }}"
+# nftables: lab-owned table guarding only lab ports | ufw: host-wide default deny | none: you manage ACLs
+common_firewall_backend: >-
+  {{ (lab_monitoring.firewall | default({})).backend | default('nftables') if common_firewall_manage | bool else 'none' }}
+common_nft_file: /etc/halab/halab.nft
 common_firewall_ssh_allow_all_interfaces: "{{ (lab_monitoring.firewall | default({})).ssh_allow_all_interfaces | default(true) }}"
 # Every node network's cidrs plus monitoring.yml allowed_sources (computed by the inventory plugin).
 common_firewall_allowed_sources: "{{ lab_allowed_sources }}"

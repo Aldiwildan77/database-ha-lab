@@ -1,0 +1,42 @@
+---
+# Only the lab's own table is written; the host's ruleset is never flushed.
+- name: Warn when ufw is active
+  ansible.builtin.command: ufw status
+  register: common_ufw_status
+  changed_when: false
+  failed_when: false
+
+- name: Report ufw coexistence
+  ansible.builtin.debug:
+    msg: >-
+      ufw is active on {{ inventory_hostname }}. The halab table only adds drops for lab ports; ufw's own
+      rules still apply, so make sure ufw also allows the lab ports or disable it.
+  when: "'Status: active' in common_ufw_status.stdout | default('')"
+
+- name: Create rules directory
+  ansible.builtin.file:
+    path: "{{ common_nft_file | dirname }}"
+    state: directory
+    mode: "0750"
+
+- name: Write lab nftables table
+  ansible.builtin.template:
+    src: halab.nft.j2
+    dest: "{{ common_nft_file }}"
+    mode: "0640"
+    validate: nft -c -f %s
+  notify: Reload halab firewall
+
+- name: Install halab-firewall unit
+  ansible.builtin.template:
+    src: halab-firewall.service.j2
+    dest: /etc/systemd/system/halab-firewall.service
+    mode: "0644"
+  notify: Reload halab firewall
+
+- name: Enable halab-firewall
+  ansible.builtin.systemd_service:
+    name: halab-firewall
+    enabled: true
+    state: started
+    daemon_reload: true
