@@ -99,7 +99,7 @@
     },
     {
       "type": "table",
-      "title": "Tailscale path (1 = direct, 0 = DERP relay)",
+      "title": "Tailscale path between tailscale nodes (1 = direct, 0 = DERP relay)",
       "id": 3,
       "datasource": {
         "type": "prometheus",
@@ -495,7 +495,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Tailscale interface throughput",
+      "title": "Interface throughput (lab interface plus others)",
       "id": 11,
       "datasource": {
         "type": "prometheus",
@@ -514,8 +514,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(node_network_receive_bytes_total{device=\"tailscale0\"}[$__rate_interval])",
-          "legendFormat": "{{node}} rx"
+          "expr": "rate(node_network_receive_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[$__rate_interval])",
+          "legendFormat": "{{node}} {{device}} rx"
         },
         {
           "refId": "B",
@@ -523,8 +523,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(node_network_transmit_bytes_total{device=\"tailscale0\"}[$__rate_interval])",
-          "legendFormat": "{{node}} tx"
+          "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[$__rate_interval])",
+          "legendFormat": "{{node}} {{device}} tx"
         }
       ],
       "fieldConfig": {

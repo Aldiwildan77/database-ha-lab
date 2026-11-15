@@ -1,13 +1,15 @@
 ---
 pxc_cfg: "{{ lab_ha.percona_xtradb_cluster | default({}) }}"
 pxc_cluster_name: "{{ pxc_cfg.cluster_name | default('halab-pxc') }}"
-pxc_encrypt_cluster_traffic: "{{ pxc_cfg.encrypt_cluster_traffic | default(false) }}"
+# Forced on when any node uses an unencrypted (private) network.
+pxc_encrypt_cluster_traffic: "{{ pxc_cfg.encrypt_cluster_traffic | default(lab_unencrypted_networks | length > 0) }}"
+pxc_cert_dir: /etc/mysql/pxc-certs
 pxc_strict_mode: "{{ pxc_cfg.strict_mode | default('ENFORCING') }}"
 pxc_repo: "{{ 'pxc-84-lts' if mysql_version == '8.4' else 'pxc-80' }}"
 pxc_bootstrap_node: "{{ groups['role_primary'][0] }}"
 pxc_config_file: /etc/mysql/mysql.conf.d/zz-ha-lab.cnf
 pxc_marker_file: /etc/mysql/.ha-lab-managed
-pxc_node_address: "{{ (node_tailscale_ips | default([]) | select('match', '^100\\.') | list | first) | default(node_fqdn, true) }}"
+pxc_node_address: "{{ node_ip | default(node_address, true) }}"
 
 pxc_wsrep_config:
   wsrep_provider: /usr/lib/galera4/libgalera_smm.so
@@ -21,3 +23,7 @@ pxc_wsrep_config:
   binlog_format: ROW
   default_storage_engine: InnoDB
   innodb_autoinc_lock_mode: 2
+pxc_tls_config:
+  ssl_ca: "{{ pxc_cert_dir }}/ca.pem"
+  ssl_cert: "{{ pxc_cert_dir }}/server-cert.pem"
+  ssl_key: "{{ pxc_cert_dir }}/server-key.pem"

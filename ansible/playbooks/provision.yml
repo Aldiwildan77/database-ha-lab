@@ -40,6 +40,9 @@
 - name: Install exporters
   ansible.builtin.import_playbook: configure-exporters.yml
 
+- name: Full-mesh connectivity with firewall and MySQL in place
+  ansible.builtin.import_playbook: check-mesh.yml
+
 - name: Provisioning summary
   hosts: mysql_nodes
   gather_facts: false

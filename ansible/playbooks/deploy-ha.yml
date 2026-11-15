@@ -29,6 +29,9 @@
       register: provisioned
       failed_when: not provisioned.stat.exists
 
+- name: Full-mesh connectivity before building the topology
+  ansible.builtin.import_playbook: check-mesh.yml
+
 - name: Deploy HA provider
   hosts: mysql_nodes
   gather_facts: false

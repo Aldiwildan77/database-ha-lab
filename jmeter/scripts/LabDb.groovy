@@ -5,7 +5,8 @@ class LabDb {
     static String url(String hostPort, String db, Properties p) {
         String connectMs = p.getProperty('connect_timeout_ms', '3000')
         String socketMs = p.getProperty('socket_timeout_ms', '15000')
-        return "jdbc:mysql://${hostPort}/${db}?sslMode=PREFERRED&allowPublicKeyRetrieval=true" +
+        String sslMode = p.getProperty('ssl_mode', 'PREFERRED')
+        return "jdbc:mysql://${hostPort}/${db}?sslMode=${sslMode}&allowPublicKeyRetrieval=true" +
                "&connectTimeout=${connectMs}&socketTimeout=${socketMs}&tcpKeepAlive=true" +
                "&rewriteBatchedStatements=true&createDatabaseIfNotExist=false&useServerPrepStmts=false"
     }

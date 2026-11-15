@@ -30,7 +30,8 @@
     lab_probe_peers: >-
       {%- set out = [] -%}
       {%- for h in groups['mysql_nodes'] | difference([inventory_hostname]) -%}
-      {%- set _ = out.append({'name': h, 'address': hostvars[h].node_fqdn, 'datacenter': hostvars[h].node_datacenter}) -%}
+      {%- set _ = out.append({'name': h, 'address': hostvars[h].node_address, 'datacenter': hostvars[h].node_datacenter,
+                              'network': hostvars[h].node_network, 'network_type': hostvars[h].node_network_type}) -%}
       {%- endfor -%}
       {{ out }}
 
@@ -39,7 +40,7 @@
     dest: /etc/ha-lab/network-probe.json
     mode: "0644"
     content: >-
-      {{ {'self': inventory_hostname, 'port': mysql_port,
+      {{ {'self': inventory_hostname, 'port': mysql_port, 'self_network_type': node_network_type,
           'textfile': '/var/lib/node_exporter/textfile/ha_lab_network.prom',
           'state': '/var/lib/ha-lab/network-state.json', 'peers': lab_probe_peers} | to_nice_json }}
 

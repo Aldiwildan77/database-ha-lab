@@ -16,7 +16,7 @@ require() {
   done
 }
 
-# Prints one line per node: name fqdn role datacenter
+# Prints one line per node: name address role datacenter network_type
 lab_nodes() {
   ansible-inventory --list 2>/dev/null | python3 -c '
 import json, sys
@@ -26,7 +26,7 @@ for h in inv.get("mysql_nodes", {}).get("hosts", []) or sorted(
         {x for g in inv.get("mysql_nodes", {}).get("children", []) for x in inv.get(g, {}).get("hosts", [])}):
     v = hv[h]
     val = lambda x: x.get("__ansible_unsafe", x) if isinstance(x, dict) else x
-    print(h, *(val(v[k]) for k in ("node_fqdn", "node_role", "node_datacenter")))
+    print(h, *(val(v[k]) for k in ("node_address", "node_role", "node_datacenter", "node_network_type")))
 '
 }
 

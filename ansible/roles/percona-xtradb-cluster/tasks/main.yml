@@ -6,7 +6,10 @@
 
 - name: Merge configuration
   ansible.builtin.set_fact:
-    pxc_effective_config: "{{ mysql_base_config | combine(pxc_wsrep_config, mysql_config, mysql_node_config) }}"
+    pxc_effective_config: >-
+      {{ mysql_base_config | combine(mysql_network_config, pxc_wsrep_config,
+                                     pxc_tls_config if pxc_encrypt_cluster_traffic | bool else {},
+                                     mysql_config, mysql_node_config) }}
 
 - name: Check for an existing datadir
   ansible.builtin.stat:
@@ -52,6 +55,40 @@
     name: mysql
     state: stopped
   when: pxc_install.changed  # noqa: no-handler
+
+# Encrypted cluster traffic needs the same CA and certificates on every node: copy the bootstrap
+# node's auto-generated ones to all nodes before they form the cluster.
+- name: Share TLS material for encrypted cluster traffic
+  when: pxc_encrypt_cluster_traffic | bool
+  block:
+    - name: Read bootstrap node certificates
+      ansible.builtin.slurp:
+        src: "/var/lib/mysql/{{ item }}"
+      loop: [ca.pem, server-cert.pem, server-key.pem]
+      register: pxc_certs
+      delegate_to: "{{ pxc_bootstrap_node }}"
+      run_once: true
+      no_log: true
+
+    - name: Create certificate directory
+      ansible.builtin.file:
+        path: "{{ pxc_cert_dir }}"
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: "0750"
+
+    - name: Install shared certificates
+      ansible.builtin.copy:
+        dest: "{{ pxc_cert_dir }}/{{ item.item }}"
+        content: "{{ item.content | b64decode }}"
+        owner: mysql
+        group: mysql
+        mode: "{{ '0600' if 'key' in item.item else '0644' }}"
+      loop: "{{ pxc_certs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
 
 - name: Write lab configuration
   ansible.builtin.template:

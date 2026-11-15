@@ -189,10 +189,10 @@ def render(meta, ctx, s, fo, cons, prom, net, events):
         L += ["> Direct-to-node run: measures one node, not client-facing HA behaviour. "
               "Do not compare directly with `ha` endpoint runs.", ""]
 
-    L += ["## Topology", "", "| Node | Datacenter | Configured role | Writable at start | MySQL | vCPU | RAM | OS | Clock offset | Synced |",
-          "|---|---|---|---|---|---|---|---|---|---|"]
+    L += ["## Topology", "", "| Node | Datacenter | Network | Configured role | Writable at start | MySQL | vCPU | RAM | OS | Clock offset | Synced |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
     for n in ctx["nodes"]:
-        L.append(f"| {n['name']} | {n['datacenter']} | {n['configured_role']} | {n['writable']} | {n['mysql_version']} | "
+        L.append(f"| {n['name']} | {n['datacenter']} | {n.get('network', '-')} ({n.get('network_type', '-')}) | {n['configured_role']} | {n['writable']} | {n['mysql_version']} | "
                  f"{n['vcpus']} | {int(n['memory_mb']) // 1024} GiB | {n['os']} | {fmt(n['clock_offset_seconds'], 'ms', 3)} | {n['clock_synced']} |")
     L.append("")
 
@@ -276,17 +276,17 @@ def render(meta, ctx, s, fo, cons, prom, net, events):
 
     L += ["## Network", ""]
     if net.get("client_to_node"):
-        L += ["| Client → node | RTT avg | RTT p50 | Loss | TCP connect | Tailscale path |", "|---|---|---|---|---|---|"]
+        L += ["| Client → node | RTT avg | RTT p50 | Loss | TCP connect | Path |", "|---|---|---|---|---|---|"]
         for n in net["client_to_node"]:
             L.append(f"| {n['node']} | {fmt(n.get('rtt_avg_s'), 'ms')} | {fmt(n.get('rtt_p50_s'), 'ms')} | "
-                     f"{fmt(n.get('loss_ratio'), '%', 1)} | {fmt(n.get('tcp_connect_avg_s'), 'ms')} | {n.get('tailscale_path')} |")
+                     f"{fmt(n.get('loss_ratio'), '%', 1)} | {fmt(n.get('tcp_connect_avg_s'), 'ms')} | {n.get('path') or n.get('tailscale_path')} |")
         L.append("")
     if net.get("pairs"):
         L += ["| Node → node | RTT min/avg/max | Loss | Path | Throughput |", "|---|---|---|---|---|"]
         for p in net["pairs"]:
             tp = f"{p['throughput_bps'] / 1e6:.0f} Mbit/s" if p.get("throughput_bps") else "-"
             L.append(f"| {p['src']} → {p['dst']} | {p.get('rtt_min_ms')}/{p.get('rtt_avg_ms')}/{p.get('rtt_max_ms')} ms | "
-                     f"{p.get('loss_pct')} % | {p.get('tailscale_path')} | {tp} |")
+                     f"{p.get('loss_pct')} % | {p.get('path') or p.get('tailscale_path')} | {tp} |")
         L.append("")
     L.append(f"Measured at {net.get('measured_at', 'n/a')}.")
     L.append("")

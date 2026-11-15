@@ -40,13 +40,14 @@ def main():
         out = []
         for t in json.load(open(a.targets)):
             host = t["targets"][0].rsplit(":", 1)[0].strip("[]")
-            out.append((t["labels"]["node"], host, t["labels"].get("datacenter", "")))
+            out.append((t["labels"]["node"], host, t["labels"].get("datacenter", ""),
+                        t["labels"].get("network_type", "tailscale")))
         return out
 
     def loop():
         n = 0
         while True:
-            for name, host, dc in nodes():
+            for name, host, dc, ntype in nodes():
                 lbl = {"peer": name, "peer_datacenter": dc}
                 rtts, s, ok = netprobe.ping(host, count=3)
                 for r in rtts:
@@ -61,7 +62,7 @@ def main():
                 with lock:
                     gauges[("network_packet_loss_ratio", name, dc)] = (s - ok) / s
                     gauges[("network_probe_success", name, dc)] = 1 if ok else 0
-                if n % 6 == 0:
+                if n % 6 == 0 and ntype == "tailscale":
                     direct, ts_rtt, _ = netprobe.tailscale_ping(host)
                     with lock:
                         if direct is not None:

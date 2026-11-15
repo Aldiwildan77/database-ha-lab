@@ -4,7 +4,7 @@ A lab for deploying, monitoring, benchmarking and comparing MySQL high-availabil
 
 - **Remote nodes** run MySQL, `mysqld_exporter` and `node_exporter`, all provisioned by Ansible.
 - **Your machine** runs Ansible, Prometheus, Grafana and (later) JMeter.
-- **All traffic** goes over Tailscale. Nothing is exposed to the public internet.
+- **Traffic** goes over Tailscale by default. Nodes can also use a private LAN or your own VPN, mixed per node. On unencrypted networks the lab enforces TLS. See [docs/architecture/networks.md](docs/architecture/networks.md).
 
 ```text
  LOCAL MACHINE (Tailscale)                         REMOTE NODES (Tailscale)
@@ -32,14 +32,14 @@ A lab for deploying, monitoring, benchmarking and comparing MySQL high-availabil
 **On your machine** (any OS; `make validate-local` checks the tools, not the OS)
 - Ansible core 2.17 or later (tested with 2.21)
 - Docker with Compose v2
-- Tailscale, connected to the same tailnet as the nodes
+- Tailscale (only when some nodes are on a `tailscale` network), plus a route to every node network
 - `python3` (standard library only), `curl`, `openssl`, `nc`
 - Java 8+ for JMeter (`make jmeter-install` downloads JMeter itself)
 
 **Remote nodes**
 - Ubuntu 22.04, Ubuntu 24.04 or Debian 12
 - x86_64 only. repo.mysql.com publishes amd64 packages only. The exporters also support arm64.
-- Joined to the tailnet with MagicDNS enabled
+- Reachable from this machine and from every other node: Tailscale with MagicDNS, a private network, or a VPN
 - SSH access with a sudo-capable user
 - Outbound internet access to repo.mysql.com, GitHub releases and the distribution mirrors
 
@@ -52,7 +52,7 @@ $EDITOR config/inventory.yml config/ha.yml config/secrets.yml
 ansible-vault encrypt config/secrets.yml
 export ANSIBLE_VAULT_PASSWORD_FILE=~/.lab-vault-pass   # or: make <target> VAULT_ARGS=--ask-vault-pass
 
-make validate             # local tools, config, secrets, Tailscale, DNS, tailscale ping, SSH, sudo, node OS
+make validate             # local tools, config, secrets, addresses, SSH, sudo, node OS, full-mesh connectivity
 make provision            # chrony, ufw, MySQL (or PXC), accounts, exporters, lab collector, network probe
 make monitoring           # targets, Prometheus + Grafana, local client probe
 make metrics-check        # promtool, direct exporter checks, Prometheus target health
@@ -79,9 +79,9 @@ Open Grafana at http://127.0.0.1:3000. The user is `admin` and the password is i
 
 | File | Purpose |
 |---|---|
-| `config/inventory.yml` | Environment name, SSH settings, nodes (name, MagicDNS FQDN, role, datacenter, optional overrides) |
+| `config/inventory.yml` | Environment name, SSH settings, networks (tailscale / vpn / private), nodes (name, address, network, role, datacenter, optional overrides) |
 | `config/ha.yml` | HA provider, MySQL version and port, global my.cnf options, exporter ports |
-| `config/monitoring.yml` | Scrape address mode, allowed source CIDRs, firewall behaviour, exporter versions |
+| `config/monitoring.yml` | Scrape address mode, extra allowed sources (for example this machine's network), firewall behaviour, exporter versions |
 | `config/secrets.yml` | exporter, replication, benchmark and admin passwords. Encrypt it with Ansible Vault. Environment variables `LAB_MYSQL_*_PASSWORD` take precedence. |
 | `config/benchmark.yml` | Client location, endpoint, dataset, load defaults, per-scenario overrides |
 
@@ -115,7 +115,7 @@ nodes:
 Configuration   make init | deps | validate | validate-local | validate-config
 Infrastructure  make provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
-Network         make network-check | network-matrix [IPERF=1]
+Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha HA=<provider> | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
 Faults          make fault NODE= FAULT=stop-mysql|kill-mysql|isolate|netem [ACTION=restore] CONFIRM=yes
 Benchmark       make jmeter-install | benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
@@ -136,7 +136,8 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 - **Replication refuses errant GTIDs.** A replica that holds transactions the primary lacks is never attached. A switchover fences the old primary before it promotes the new one, and unfences it automatically if the promotion fails.
 - **Faults need opt-in.** Every fault requires `CONFIRM=yes`. Isolation and netem also schedule a restore on the node itself.
 - **Destructive targets need confirmation.** `make destroy` asks you to type the environment name. `DATA=1` also purges the server packages and the datadir.
-- **Firewall.** ufw denies incoming traffic by default. SSH and Tailscale UDP 41641 are allowed first, so you are not locked out. MySQL (3306) and the exporters (9100, 9104) are allowed only on `tailscale0` and only from `allowed_sources`, which defaults to the whole tailnet. Narrow it to this machine's Tailscale IP, and use Tailscale ACLs as the primary control.
+- **Firewall.** ufw denies incoming traffic by default. SSH (and Tailscale UDP 41641 on Tailscale nodes) is allowed first, so you are not locked out. Lab ports are allowed only on each node's lab interface, and only from the node networks' `cidrs` plus `allowed_sources`. On Tailscale, use ACLs as the primary control.
+- **Connectivity is verified before changes.** `make mesh-check` runs inside `validate`, `provision` and `ha`. It tests every node pair on the provider's ports, logs in to MySQL over TLS, and checks this machine's access to the client and monitoring ports.
 - **Secrets stay out of Git.** The real config files, the secrets file and the generated targets are all gitignored.
 - **Root access.** MySQL `root@localhost` keeps `auth_socket`. Ansible connects over the Unix socket as OS root, so the lab never manages a root password.
 

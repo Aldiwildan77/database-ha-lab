@@ -66,11 +66,12 @@ To rebuild a report later (for example after Prometheus was down): `make report 
 ```bash
 make failover CONFIRM=yes                         # stop-mysql on the primary under write-heavy load
 make failover CONFIRM=yes FAULT=kill-mysql        # SIGKILL (systemd may restart mysqld)
-make failover CONFIRM=yes FAULT=isolate           # drop DB ports on tailscale0; SSH and exporters stay up
-make benchmark SCENARIO=network-disruption CONFIRM=yes RUN_ARGS='--netem "delay 150ms 30ms loss 2%"'
+make failover CONFIRM=yes FAULT=isolate           # drop DB ports on the node's lab interface; SSH and exporters stay up
+make benchmark SCENARIO=network-disruption CONFIRM=yes RUN_ARGS='--netem "delay 150ms 30ms loss 2%"'   # applied on the node's lab interface
 ```
 
 **Preflight.** Before each experiment, check:
+- `make mesh-check` passes;
 - `make topology` is healthy;
 - `make metrics-check` shows every target up;
 - no other benchmark is running.

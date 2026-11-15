@@ -12,8 +12,8 @@
 - These packages **replace** Oracle MySQL. The `ha_provider` must be chosen before provisioning.
 - At least 3 nodes, an odd number recommended. Quorum is a majority of the last primary component.
 - `pxc_strict_mode=ENFORCING`, `wsrep_sst_method=xtrabackup-v2`.
-- `pxc_encrypt_cluster_traffic=OFF` by default. Tailscale (WireGuard) already encrypts traffic between nodes. Turning it on needs identical certificates on every node, which is not automated here.
-- Ports open on tailscale0:
+- `pxc_encrypt_cluster_traffic` is OFF on encrypted networks (Tailscale or VPN) and is **forced ON** when any node is on a `private` network. When it is on, the bootstrap node's CA and certificates are copied to every node (`/etc/mysql/pxc-certs`) before the cluster forms.
+- Ports open on each node's lab interface:
   - 3306 (MySQL);
   - 4567 TCP and UDP (group communication);
   - 4568 (IST);

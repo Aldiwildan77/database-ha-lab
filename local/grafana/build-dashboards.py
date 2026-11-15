@@ -195,7 +195,7 @@ n.add("table", "RTT matrix p50 (row = source, column = destination)",
       [(q('network_rtt_seconds_bucket{job="node"}', 0.5, "node, peer, le"), "")], unit="s", w=12, h=8,
       extra={"targets": [{"refId": "A", "datasource": DS, "expr": q('network_rtt_seconds_bucket{job="node"}', 0.5, "node, peer, le").replace("$__rate_interval", "5m"), "format": "table", "instant": True}],
              "transformations": [{"id": "groupingToMatrix", "options": {"columnField": "peer", "rowField": "node", "valueField": "Value"}}]})
-n.add("table", "Tailscale path (1 = direct, 0 = DERP relay)", [("network_tailscale_direct", "")], w=12, h=8,
+n.add("table", "Tailscale path between tailscale nodes (1 = direct, 0 = DERP relay)", [("network_tailscale_direct", "")], w=12, h=8,
       extra={"targets": [{"refId": "A", "datasource": DS, "expr": "network_tailscale_direct", "format": "table", "instant": True}],
              "transformations": [{"id": "groupingToMatrix", "options": {"columnField": "peer", "rowField": "node", "valueField": "Value"}}]})
 n.add("timeseries", "Node → node RTT p50 / p99", [(q('network_rtt_seconds_bucket{job="node"}', x, "node, peer, le"), "{{node}}→{{peer}} p" + str(int(x*100))) for x in (0.5, 0.99)], unit="s")
@@ -205,7 +205,7 @@ n.add("timeseries", "Client → node RTT p50 / p99", [(q('network_rtt_seconds_bu
 n.add("timeseries", "TCP connect to MySQL p50", [(q('tcp_connect_duration_seconds_bucket', 0.5, "job, node, peer, le"), "{{job}} {{node}}→{{peer}}")], unit="s")
 n.add("timeseries", "Network availability (probe success)", [("avg_over_time(network_probe_success[5m])", "{{job}} {{node}}→{{peer}}")], unit="percentunit")
 n.add("timeseries", "TCP retransmissions / s", [("rate(node_netstat_Tcp_RetransSegs[$__rate_interval])", "{{node}}")], unit="ops")
-n.add("timeseries", "Tailscale interface throughput", [('rate(node_network_receive_bytes_total{device="tailscale0"}[$__rate_interval])', "{{node}} rx"), ('rate(node_network_transmit_bytes_total{device="tailscale0"}[$__rate_interval])', "{{node}} tx")], unit="Bps", w=24)
+n.add("timeseries", "Interface throughput (lab interface plus others)", [('rate(node_network_receive_bytes_total{device!~"lo|docker.*|veth.*|br-.*"}[$__rate_interval])', "{{node}} {{device}} rx"), ('rate(node_network_transmit_bytes_total{device!~"lo|docker.*|veth.*|br-.*"}[$__rate_interval])', "{{node}} {{device}} tx")], unit="Bps", w=24)
 n.save(f"{out}/network.json", "lab-network", "Network", ["network"], "", [])
 
 # ---------------- 5. Replication & HA

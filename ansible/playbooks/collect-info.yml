@@ -22,6 +22,7 @@
       register: info_ts
       changed_when: false
       failed_when: false
+      when: node_network_type == 'tailscale'
 
     - name: Build node record
       ansible.builtin.set_fact:
@@ -37,6 +38,10 @@
           cpu_model: "{{ ansible_processor[2] | default(ansible_processor | last) }}"
           memory_mb: "{{ ansible_memtotal_mb }}"
           disks: "{{ ansible_devices.keys() | reject('match', '^(loop|ram|sr|dm-)') | list }}"
+          network: "{{ node_network }}"
+          network_type: "{{ node_network_type }}"
+          interface: "{{ node_interface }}"
+          interface_ipv4: "{{ (ansible_facts[node_interface | replace('-', '_')] | default({})).ipv4.address | default('') }}"
           tailscale_ips: "{{ info_ts.stdout_lines | default([]) }}"
           mysql_version: "{{ info_mysql.version.full | default('not installed') }}"
           clock_synced: "{{ (info_chrony.stdout.split(','))[13] | default('') | trim == 'Normal' }}"

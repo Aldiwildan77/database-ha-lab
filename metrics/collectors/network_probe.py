@@ -40,7 +40,7 @@ def main():
 
     reg = promlib.Registry()
     for p in cfg["peers"]:
-        lbl = {"peer": p["name"], "peer_datacenter": p.get("datacenter", "")}
+        lbl = {"peer": p["name"], "peer_datacenter": p.get("datacenter", ""), "peer_network": p.get("network", "")}
         rtts, n, ok = netprobe.ping(p["address"])
         for r in rtts:
             rtt.observe(r, **lbl)
@@ -49,7 +49,8 @@ def main():
         reg.gauge("network_packet_loss_ratio", (n - ok) / n if n else 1, lbl, "Loss ratio of the last probe round.")
         if rtts:
             reg.gauge("network_rtt_last_seconds", sum(rtts) / len(rtts), lbl, "Mean RTT of the last probe round.")
-        direct, ts_rtt, _ = netprobe.tailscale_ping(p["address"])
+        both_ts = cfg.get("self_network_type", "tailscale") == "tailscale" and p.get("network_type", "tailscale") == "tailscale"
+        direct, ts_rtt, _ = netprobe.tailscale_ping(p["address"]) if both_ts else (None, None, "")
         if direct is not None:
             reg.gauge("network_tailscale_direct", 1 if direct else 0, lbl, "1 = direct WireGuard path, 0 = DERP relay.")
             reg.gauge("network_tailscale_rtt_seconds", ts_rtt, lbl)

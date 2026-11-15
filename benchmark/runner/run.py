@@ -155,16 +155,18 @@ class Poller(threading.Thread):
 
 def client_network(ctx, samples=10):
     out = []
+    ntype = {n["name"]: n.get("network_type", "tailscale") for n in ctx["nodes"]}
     for name, addr in ctx["addresses"].items():
         rtts, sent, ok = netprobe.ping(addr, count=samples)
         tcp = [d for d in (netprobe.tcp_connect(addr, ctx["mysql_port"]) for _ in range(5)) if d is not None]
-        direct, ts_rtt, path = netprobe.tailscale_ping(addr)
+        direct, ts_rtt, path = netprobe.tailscale_ping(addr) if ntype.get(name) == "tailscale" else (None, None, "")
         srt = sorted(rtts)
         out.append({"node": name, "address": addr, "rtt_avg_s": sum(rtts) / len(rtts) if rtts else None,
                     "rtt_p50_s": srt[len(srt) // 2] if srt else None, "rtt_min_s": srt[0] if srt else None,
                     "rtt_max_s": srt[-1] if srt else None, "loss_ratio": (sent - ok) / sent if sent else None,
                     "tcp_connect_avg_s": sum(tcp) / len(tcp) if tcp else None,
-                    "tailscale_direct": direct, "tailscale_rtt_s": ts_rtt, "tailscale_path": path})
+                    "network_type": ntype.get(name), "tailscale_direct": direct, "tailscale_rtt_s": ts_rtt,
+                    "path": f"tailscale {path}" if path else ntype.get(name)})
     return out
 
 
@@ -232,6 +234,7 @@ def main():
     props = {
         "run_id": run_id, "endpoints": ",".join(ctx["endpoint"]["endpoints"]), "endpoint_mode": ctx["endpoint"]["mode"],
         "database": ctx["database"], "lab_script_dir": os.path.join(ROOT, "jmeter", "scripts"),
+        "ssl_mode": ctx.get("ssl_mode", "PREFERRED"),
         "rows": dataset.get("rows", 100000), "seed": dataset.get("seed", 42),
     }
     keymap = {"threads": "threads", "ramp_up_seconds": "rampup", "duration_seconds": "duration", "read_ratio": "read_ratio",

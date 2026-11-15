@@ -1,17 +1,16 @@
 ---
-# ip: scrape Tailscale IPs resolved on this machine (needed with Docker Desktop,
-# whose containers may not resolve MagicDNS). fqdn: scrape by MagicDNS name.
+# ip: scrape the address resolved on this machine (needed with Docker Desktop, whose containers
+# may not resolve MagicDNS). fqdn: scrape by node address as written in inventory.yml.
 scrape_address: ip
 
-# Sources allowed to reach MySQL/exporters (ufw on tailscale0).
-# Narrow to this machine's Tailscale IP, e.g. [100.101.102.103/32].
-allowed_sources:
-  - 100.64.0.0/10
-  - fd7a:115c:a1e0::/48
+# Extra sources allowed to reach MySQL, exporters and HA ports, on top of every node network's cidrs
+# (which are always allowed so nodes can replicate). Add this machine's network when it is not on one
+# of the node networks, e.g. [192.168.10.0/24] or a VPN client range.
+allowed_sources: []
 
 firewall:
   manage: true
-  ssh_allow_all_interfaces: true   # false = SSH only via tailscale0; lockout risk if you use the public IP
+  ssh_allow_all_interfaces: true   # false = SSH only on the node's lab interface; lockout risk otherwise
 
 exporters:
   node_exporter:

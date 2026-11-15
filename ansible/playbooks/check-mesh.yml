@@ -1,0 +1,193 @@
+---
+# Full-mesh connectivity check for the selected HA provider.
+#   node -> every peer: TCP on lab_mesh_tcp_ports (MySQL, GR, Galera, orchestrator ...)
+#   node -> every peer: MySQL login as the replication account over TLS (when MySQL runs)
+#   this machine -> every node: client ports (MySQL / Router) and monitoring ports
+# Ports with no service yet get a temporary listener, so routing and firewall rules are tested
+# before MySQL or the HA software exists. UDP (Galera 4567/udp) cannot be verified this way.
+- name: Prepare temporary listeners
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  vars:
+    mesh_all_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports + lab_monitoring_tcp_ports) | map('int') | unique | list }}"
+  tasks:
+    - name: Find ports already served
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json, socket, sys
+            out = {}
+            for p in json.loads(sys.argv[1]):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    s.bind(("0.0.0.0", p)); out[p] = "free"
+                except OSError:
+                    out[p] = "service"
+                finally:
+                    s.close()
+            print(json.dumps(out))
+          - "{{ mesh_all_ports | to_json }}"
+      register: mesh_bind
+      changed_when: false
+
+    - name: Record port state
+      ansible.builtin.set_fact:
+        mesh_port_state: "{{ mesh_bind.stdout | from_json }}"
+
+    - name: Start temporary listeners on free ports
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            # halab-port-listener
+            import json, selectors, socket, sys, time
+            sel, end = selectors.DefaultSelector(), time.time() + int(sys.argv[2])
+            for p in json.loads(sys.argv[1]):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("0.0.0.0", p)); s.listen(64); s.setblocking(False)
+                sel.register(s, selectors.EVENT_READ)
+            while time.time() < end:
+                for key, _ in sel.select(timeout=0.5):
+                    try:
+                        c, _ = key.fileobj.accept(); c.close()
+                    except OSError:
+                        pass
+          - "{{ mesh_port_state | dict2items | selectattr('value', 'equalto', 'free') | map(attribute='key') | map('int') | list | to_json }}"
+          - "{{ mesh_listener_seconds | default(120) }}"
+      async: "{{ (mesh_listener_seconds | default(120) | int) + 30 }}"
+      poll: 0
+      changed_when: false
+      when: mesh_port_state.values() | select('equalto', 'free') | list | length > 0
+
+    - name: Give listeners a moment to bind
+      ansible.builtin.wait_for:
+        timeout: 2
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+- name: Check node-to-node mesh
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Load secrets
+      ansible.builtin.import_tasks: ../tasks/load-secrets.yml
+  tasks:
+    - name: TCP connect to every peer port
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item.0].node_address }}"
+        port: "{{ item.1 }}"
+        timeout: 5
+      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) | product(lab_mesh_tcp_ports) | list }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.0 }}:{{ item.1 }}"
+      register: mesh_tcp
+      failed_when: false
+
+    - name: MySQL login to every peer over TLS (replication account, else benchmark account)
+      ansible.builtin.command:
+        argv:
+          - mysql
+          - --protocol=TCP
+          - "--host={{ hostvars[item].node_address }}"
+          - "--port={{ mysql_port }}"
+          - "--user={{ 'repl' if mysql_replication_password | length > 0 else 'bench' }}"
+          - --ssl-mode=REQUIRED
+          - --connect-timeout=5
+          - -N
+          - -e
+          - SELECT CONCAT(@@report_host, ' tls=', IF(VARIABLE_VALUE = '', 'no', VARIABLE_VALUE)) FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_version'
+      environment:
+        MYSQL_PWD: "{{ mysql_replication_password if mysql_replication_password | length > 0 else mysql_benchmark_password }}"
+      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      register: mesh_login
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when:
+        - (mysql_replication_password | length > 0) or (mysql_benchmark_password | length > 0)
+        - hostvars[item].mesh_port_state[mysql_port | string] == 'service'
+
+    - name: Summarise node failures
+      ansible.builtin.set_fact:
+        mesh_failures: >-
+          {%- set out = [] -%}
+          {%- for r in mesh_tcp.results if r.msg is defined -%}
+          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item.0 ~ ':' ~ r.item.1 ~ ' TCP unreachable') -%}
+          {%- endfor -%}
+          {%- for r in mesh_login.results | default([]) if not (r.skipped | default(false)) and r.rc | default(1) != 0 -%}
+          {%- set _ = out.append(inventory_hostname ~ ' -> ' ~ r.item ~ ' MySQL login as repl failed: '
+                ~ (r.stderr | default(r.msg | default('')) | regex_replace('mysql: \\[Warning\\][^\\n]*\\n?', '') | trim)) -%}
+          {%- endfor -%}
+          {{ out }}
+
+- name: Check this machine to nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Local checks
+      block:
+        - name: Resolve node addresses
+          ansible.builtin.import_tasks: ../tasks/resolve-node-addresses.yml
+
+        - name: TCP connect to client and monitoring ports
+          ansible.builtin.wait_for:
+            host: "{{ lab_node_addresses[item.0] }}"
+            port: "{{ item.1 }}"
+            timeout: 5
+          loop: "{{ groups['mysql_nodes'] | product(lab_client_tcp_ports + lab_monitoring_tcp_ports) | list }}"
+          loop_control:
+            label: "local -> {{ item.0 }}:{{ item.1 }}"
+          register: mesh_local
+          failed_when: false
+      rescue:
+        - name: Record local failure
+          ansible.builtin.set_fact:
+            mesh_local_error: >-
+              local: {{ (ansible_failed_result.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+                        | map(attribute='msg') | list | join(' | ')) or ansible_failed_result.msg | default('check failed') }}
+
+- name: Stop temporary listeners
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Kill listeners
+      ansible.builtin.command: pkill -f halab-port-listener
+      register: mesh_kill
+      changed_when: mesh_kill.rc == 0
+      failed_when: false
+
+- name: Verdict
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Show results
+      ansible.builtin.debug:
+        msg: >-
+          node-to-node: {{ (groups['mysql_nodes'] | length) * (groups['mysql_nodes'] | length - 1) }} pairs x
+          TCP {{ lab_mesh_tcp_ports }}, plus MySQL TLS login where MySQL runs;
+          local-to-node: TCP {{ lab_client_tcp_ports + lab_monitoring_tcp_ports }}.
+          {{ ('UDP ' ~ lab_mesh_udp_ports ~ ' cannot be verified by TCP connect; confirm those firewall rules manually.') if lab_mesh_udp_ports else '' }}
+
+    - name: Assert full mesh
+      ansible.builtin.assert:
+        that: lab_all_failures | length == 0
+        fail_msg: "Connectivity problems:\n{{ lab_all_failures | join('\n') }}"
+        success_msg: "Full mesh OK"
+      vars:
+        lab_all_failures: >-
+          {{ (groups['mysql_nodes'] | map('extract', hostvars, 'mesh_failures') | select('defined') | flatten)
+             + ([mesh_local_error] if mesh_local_error is defined else [])
+             + (mesh_local.results | default([]) | selectattr('msg', 'defined')
+                | map(attribute='item') | map('join', ':') | map('regex_replace', '^', 'local -> ')
+                | map('regex_replace', '$', ' TCP unreachable (add this machine to monitoring.yml allowed_sources?)') | list) }}

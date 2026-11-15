@@ -26,7 +26,9 @@
                  'node': n,
                  'role': hostvars[n].node_role,
                  'datacenter': hostvars[n].node_datacenter,
-                 'fqdn': hostvars[n].node_fqdn,
+                 'fqdn': hostvars[n].node_address,
+                 'network': hostvars[n].node_network,
+                 'network_type': hostvars[n].node_network_type,
                }}) %}
           {% endfor %}
           {{ out | to_nice_json }}

@@ -8,10 +8,10 @@
     comment: ha-lab ssh
   when: common_firewall_ssh_allow_all_interfaces | bool
 
-- name: Allow SSH on tailscale0
+- name: Allow SSH on the lab interface
   community.general.ufw:
     rule: allow
-    interface: tailscale0
+    interface: "{{ node_interface }}"
     direction: in
     port: "{{ ansible_port | default(22) | string }}"
     proto: tcp
@@ -24,11 +24,12 @@
     port: "41641"
     proto: udp
     comment: tailscale
+  when: node_network_type == 'tailscale'
 
-- name: Allow lab ports from permitted Tailscale sources
+- name: Allow lab ports from permitted sources
   community.general.ufw:
     rule: allow
-    interface: tailscale0
+    interface: "{{ node_interface }}"
     direction: in
     from_ip: "{{ item.0 }}"
     to_port: "{{ item.1 | string }}"
@@ -36,10 +37,10 @@
     comment: ha-lab
   loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports) | list }}"
 
-- name: Allow lab UDP ports from permitted Tailscale sources
+- name: Allow lab UDP ports from permitted sources
   community.general.ufw:
     rule: allow
-    interface: tailscale0
+    interface: "{{ node_interface }}"
     direction: in
     from_ip: "{{ item.0 }}"
     to_port: "{{ item.1 | string }}"

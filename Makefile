@@ -15,7 +15,7 @@ CONFIG_FILES := inventory ha monitoring benchmark
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
 .PHONY: help init deps validate validate-local validate-config provision configure-exporters collect-info \
-        targets monitoring monitoring-stop monitoring-status metrics-check network-check network-matrix \
+        targets monitoring monitoring-stop monitoring-status metrics-check mesh-check network-check network-matrix \
         probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
         dashboards benchmark failover report status destroy lint
 
@@ -83,6 +83,9 @@ probes-stop: ## Stop the local probe exporter
 	@local/scripts/probes.sh stop
 
 # ---------------------------------------------------------------- Network
+mesh-check: validate-config ## Full-mesh TCP + MySQL TLS login between nodes, and this machine to nodes
+	$(ansible) ansible/playbooks/check-mesh.yml
+
 network-check: validate-config ## Local-to-node DNS, tailscale ping and port checks
 	local/scripts/check-connectivity.sh
 

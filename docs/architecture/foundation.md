@@ -10,13 +10,13 @@
 | Node-local accounts | Created with `sql_log_bin=0` | Prevents errant GTIDs once replication is configured |
 | Server defaults | GTID on, `sync_binlog=1`, `innodb_flush_log_at_trx_commit=1`, Performance Schema transaction consumers on | Durable baseline shared by every HA provider so comparisons start from the same settings |
 | Exporters | Official release binaries, SHA-256 verified, systemd with hardening | No third-party packages; versions pinned in `config/monitoring.yml` |
-| Scrape address | Tailscale IP resolved on the controller at target generation (default) | Docker Desktop containers may not resolve MagicDNS |
+| Scrape address | Node address resolved on the controller at target generation (default) | Docker Desktop containers may not resolve MagicDNS or internal DNS |
 | Prometheus labels | `environment, ha_provider, node, role, datacenter, fqdn` | Bounded cardinality; no per-transaction labels |
 | Statement digests | `perf_schema.eventsstatements` collector disabled | `digest_text` label is unbounded |
 
 ## Assumptions
 
-- Nodes and this machine are on one tailnet; MagicDNS is enabled; Tailscale ACLs permit SSH, 3306, 9100, 9104 from this machine and between nodes.
+- Every node reaches every other node, and this machine reaches every node, on the networks defined in `config/inventory.yml` (see [networks.md](networks.md)). `make mesh-check` verifies this.
 - Nodes have outbound internet access for package and binary downloads.
 - `role` label is the *configured initial* role. After a failover the real primary differs; dashboards for HA (Phase 4+) read the actual role from MySQL metrics.
 

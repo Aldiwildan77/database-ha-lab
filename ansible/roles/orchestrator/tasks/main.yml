@@ -10,7 +10,7 @@
   ansible.mysql.mysql_user:
     login_unix_socket: /var/run/mysqld/mysqld.sock
     name: "{{ orchestrator_user }}"
-    host: 100.64.0.0/255.192.0.0
+    host: "{{ item }}"
     plugin: caching_sha2_password
     plugin_auth_string: "{{ mysql_admin_password }}"
     salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
@@ -18,6 +18,7 @@
     session_vars:
       sql_log_bin: 0
     state: present
+  loop: "{{ mysql_client_hosts }}"
   no_log: true
 
 - name: Enable Percona repository

@@ -36,7 +36,9 @@ mysql_base_config:
   performance_schema_consumer_events_transactions_current: "ON"
   performance_schema_consumer_events_transactions_history: "ON"
 
-mysql_effective_config: "{{ mysql_base_config | combine(mysql_config, mysql_node_config) }}"
+# Unencrypted (private) networks: refuse non-TLS TCP connections. Unix-socket logins are unaffected.
+mysql_network_config: "{{ {'require_secure_transport': 'ON'} if lab_unencrypted_networks | default([]) else {} }}"
+mysql_effective_config: "{{ mysql_base_config | combine(mysql_network_config, mysql_config, mysql_node_config) }}"
 
 mysql_users_session_vars:
   sql_log_bin: 0
@@ -44,5 +46,5 @@ mysql_exporter_user: exporter
 mysql_replication_user: repl
 mysql_benchmark_user: bench
 mysql_benchmark_database: "{{ lab_benchmark.database | default('halab') }}"
-# IPv4 Tailscale range in MySQL host-pattern form.
-mysql_tailnet_host: 100.64.0.0/255.192.0.0
+# MySQL host patterns (net/mask) for every node network and allowed source; computed by the inventory plugin.
+mysql_account_hosts: "{{ mysql_client_hosts }}"

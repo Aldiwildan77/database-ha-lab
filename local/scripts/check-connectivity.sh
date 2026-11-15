@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
-# Local-to-node checks over Tailscale: DNS, tailscale ping (path + latency), TCP ports.
+# Local-to-node checks: DNS, path (tailscale ping for tailscale nodes, ICMP otherwise), TCP ports.
 source "$(dirname "$0")/lib.sh"
-require tailscale python3 ansible-inventory nc
+require python3 ansible-inventory nc ping
 
-ports="${PORTS:-22 3306 9100 9104}"
+ports="${PORTS:-22 3306 9100 9104 9106}"
 fail=0
+nodes="$(lab_nodes)"
 
-state="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["BackendState"])')"
-[[ "$state" == "Running" ]] || { red "local tailscale state: $state"; exit 1; }
-green "local tailscale: Running"
+if grep -q ' tailscale$' <<<"$nodes"; then
+  require tailscale
+  state="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["BackendState"])')"
+  [[ "$state" == "Running" ]] || { red "local tailscale state: $state"; exit 1; }
+  green "local tailscale: Running"
+fi
 
-while read -r name fqdn role dc; do
-  echo "== ${name} (${fqdn}, ${role}, ${dc})"
-  ip="$(python3 -c 'import socket,sys; print(socket.gethostbyname(sys.argv[1]))' "$fqdn" 2>/dev/null || true)"
+while read -r name addr role dc ntype; do
+  echo "== ${name} (${addr}, ${role}, ${dc}, ${ntype})"
+  ip="$(python3 -c 'import socket,sys; print(socket.gethostbyname(sys.argv[1]))' "$addr" 2>/dev/null || true)"
   if [[ -z "$ip" ]]; then red "  dns: cannot resolve"; fail=1; continue; fi
-  case "$ip" in
-    100.*) echo "  dns: $ip" ;;
-    *) yellow "  dns: $ip (not a Tailscale address)"; fail=1 ;;
-  esac
-  if pong="$(tailscale ping --c 3 --timeout 5s "$fqdn" 2>&1 | grep 'pong' | tail -1)" && [[ -n "$pong" ]]; then
-    echo "  tailscale: ${pong}"
+  echo "  address: $ip"
+  if [[ "$ntype" == "tailscale" ]]; then
+    if pong="$(tailscale ping --c 3 --timeout 5s "$addr" 2>&1 | grep 'pong' | tail -1)" && [[ -n "$pong" ]]; then
+      echo "  tailscale: ${pong}"
+    else
+      red "  tailscale: no pong"; fail=1
+    fi
+  elif rtt="$(ping -c 3 "$ip" 2>/dev/null | tail -1)" && [[ "$rtt" == *"/"* ]]; then
+    echo "  icmp: ${rtt}"
   else
-    red "  tailscale: no pong"; fail=1
+    yellow "  icmp: no reply (may be filtered)"
   fi
   for p in $ports; do
     if nc -z -G 3 -w 3 "$ip" "$p" >/dev/null 2>&1 || nc -z -w 3 "$ip" "$p" >/dev/null 2>&1; then
@@ -30,6 +37,6 @@ while read -r name fqdn role dc; do
       yellow "  tcp/${p}: closed or filtered"
     fi
   done
-done < <(lab_nodes)
+done <<<"$nodes"
 
 exit "$fail"

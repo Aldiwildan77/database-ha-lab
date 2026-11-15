@@ -1,5 +1,5 @@
 ---
-# Node-to-node RTT, loss, Tailscale path and (optionally) iperf3 throughput.
+# Node-to-node RTT, loss, path (Tailscale path or kernel route) and (optionally) iperf3 throughput.
 #   -e out=<file.json>   default local/state/network-matrix-<ts>.json
 #   -e iperf=true        add 5 s iperf3 throughput per ordered pair (sequential)
 - name: Measure node-to-node network
@@ -9,17 +9,28 @@
   tasks:
     - name: Ping peers
       ansible.builtin.command:
-        argv: [ping, -n, -q, -c, "{{ ping_count | default(20) }}", -i, "0.2", "{{ hostvars[item].node_fqdn }}"]
+        argv: [ping, -n, -q, -c, "{{ ping_count | default(20) }}", -i, "0.2", "{{ hostvars[item].node_address }}"]
       loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
       register: nm_ping
       changed_when: false
       failed_when: false
 
-    - name: Tailscale ping peers
+    - name: Tailscale ping peers (both ends on tailscale networks)
       ansible.builtin.command:
-        argv: [tailscale, ping, --c, "3", --timeout, 3s, "{{ hostvars[item].node_fqdn }}"]
+        argv: [tailscale, ping, --c, "3", --timeout, 3s, "{{ hostvars[item].node_address }}"]
       loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
       register: nm_ts
+      changed_when: false
+      failed_when: false
+      when: node_network_type == 'tailscale' and hostvars[item].node_network_type == 'tailscale'
+
+    - name: Read kernel route to each peer
+      ansible.builtin.shell: >-
+        set -o pipefail; ip route get "$(getent ahostsv4 {{ hostvars[item].node_address }} | awk 'NR==1 {print $1}')" | head -1
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      register: nm_route
       changed_when: false
       failed_when: false
 
@@ -30,15 +41,18 @@
           {%- for p in nm_ping.results -%}
           {%- set rtt = p.stdout | regex_search('= ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms', '\\1', '\\2', '\\3', '\\4') -%}
           {%- set loss = p.stdout | regex_search('([\d.]+)% packet loss', '\\1') -%}
-          {%- set ts = (nm_ts.results[loop.index0].stdout_lines | select('search', 'pong') | list | last) | default('') -%}
+          {%- set ts = (nm_ts.results[loop.index0].stdout_lines | default([]) | select('search', 'pong') | list | last) | default('') -%}
+          {%- set rt = nm_route.results[loop.index0].stdout | default('') -%}
           {%- set _ = out.append({
                 'src': inventory_hostname, 'dst': p.item,
                 'src_datacenter': node_datacenter, 'dst_datacenter': hostvars[p.item].node_datacenter,
                 'rtt_min_ms': rtt[0] | float if rtt else none, 'rtt_avg_ms': rtt[1] | float if rtt else none,
                 'rtt_max_ms': rtt[2] | float if rtt else none, 'rtt_mdev_ms': rtt[3] | float if rtt else none,
                 'loss_pct': loss[0] | float if loss else 100.0,
-                'tailscale_path': (ts | regex_search('via (.*) in', '\\1') | first) if ts else 'unreachable',
-                'tailscale_direct': (ts is search('via \\d')) if ts else false }) -%}
+                'src_network': node_network, 'dst_network': hostvars[p.item].node_network,
+                'path': ('tailscale ' ~ (ts | regex_search('via (.*) in', '\\1') | first)) if ts
+                        else ('route ' ~ (rt | regex_replace('\\s+uid.*$', '') | regex_replace('^\\S+\\s+', ''))) if rt else 'unknown',
+                'tailscale_direct': (ts is search('via \\d')) if ts else none }) -%}
           {%- endfor -%}
           {{ out }}
 
@@ -59,7 +73,7 @@
 
         - name: Run iperf3 client
           ansible.builtin.command:
-            argv: [iperf3, -c, "{{ hostvars[item].node_fqdn }}", -p, "5201", -t, "5", -J]
+            argv: [iperf3, -c, "{{ hostvars[item].node_address }}", -p, "5201", -t, "5", -J]
           loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
           register: nm_iperf
           changed_when: false
@@ -94,7 +108,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ p.src }} -> {{ p.dst }}: rtt avg {{ p.rtt_avg_ms }} ms (min {{ p.rtt_min_ms }}, max {{ p.rtt_max_ms }}),
-          loss {{ p.loss_pct }}%, path {{ p.tailscale_path }}{{ (', ' ~ ((p.throughput_bps / 1e6) | round(1)) ~ ' Mbit/s') if p.throughput_bps | default(none) else '' }}
+          loss {{ p.loss_pct }}%, path {{ p.path }}{{ (', ' ~ ((p.throughput_bps / 1e6) | round(1)) ~ ' Mbit/s') if p.throughput_bps | default(none) else '' }}
       loop: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten }}"
       loop_control:
         loop_var: p

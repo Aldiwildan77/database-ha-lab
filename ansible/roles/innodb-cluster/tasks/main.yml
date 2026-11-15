@@ -15,7 +15,7 @@
   ansible.mysql.mysql_user:
     login_unix_socket: /var/run/mysqld/mysqld.sock
     name: "{{ innodb_cluster_admin }}"
-    host: 100.64.0.0/255.192.0.0
+    host: "{{ item }}"
     plugin: caching_sha2_password
     plugin_auth_string: "{{ mysql_admin_password }}"
     salt: "{{ (('halab-' ~ inventory_hostname) | hash('sha1'))[:20] }}"
@@ -23,6 +23,7 @@
     session_vars:
       sql_log_bin: 0
     state: present
+  loop: "{{ mysql_client_hosts }}"
   no_log: true
 
 # configureInstance is idempotent and persists GR prerequisites with SET PERSIST.
@@ -61,7 +62,7 @@
       - -e
       - >-
         try { dba.getCluster('{{ innodb_cluster_name }}'); print('\nexists'); }
-        catch (e) { dba.createCluster('{{ innodb_cluster_name }}', {communicationStack: 'MYSQL'}); print('\ncreated'); }
+        catch (e) { dba.createCluster('{{ innodb_cluster_name }}', {communicationStack: 'MYSQL', memberSslMode: '{{ 'REQUIRED' if lab_unencrypted_networks else 'AUTO' }}'}); print('\ncreated'); }
     stdin: "{{ mysql_admin_password }}"
   register: ic_create
   changed_when: "'created' in ic_create.stdout"

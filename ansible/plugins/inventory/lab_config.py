@@ -44,10 +44,17 @@ HA_PROVIDERS = {
 NODE_ROLES = {"primary", "replica"}
 MYSQL_VERSIONS = {"8.0", "8.4"}
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
-FQDN_RE = re.compile(r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}\.?$")
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+HOST_RE = re.compile(r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?$")
 TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
 TAILSCALE_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+TAILSCALE_CIDRS = [str(TAILSCALE_V4), str(TAILSCALE_V6)]
+# type: (default interface, default cidrs, encrypted by default)
+NETWORK_TYPES = {
+    "tailscale": ("tailscale0", TAILSCALE_CIDRS, True),
+    "vpn": (None, None, True),        # WireGuard/OpenVPN/IPsec managed outside the lab
+    "private": (None, None, False),   # plain internal network: TLS is enforced by the lab
+}
 
 
 def is_tailscale_ip(value: str) -> bool:
@@ -56,6 +63,27 @@ def is_tailscale_ip(value: str) -> bool:
     except ValueError:
         return False
     return ip in TAILSCALE_V4 or ip in TAILSCALE_V6
+
+
+def is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def in_cidrs(value: str, cidrs) -> bool:
+    ip = ipaddress.ip_address(value)
+    return any(ip in ipaddress.ip_network(c, strict=False) for c in cidrs)
+
+
+def mysql_host_pattern(cidr: str):
+    """IPv4 CIDR -> MySQL 'net/mask' host pattern (works on 8.0 and 8.4). IPv6 has no netmask form."""
+    net = ipaddress.ip_network(cidr, strict=False)
+    if net.version != 4:
+        return None
+    return str(net.network_address) if net.prefixlen == 32 else f"{net.network_address}/{net.netmask}"
 
 
 def group_safe(value: str) -> str:
@@ -97,7 +125,8 @@ class InventoryModule(BaseInventoryPlugin):
 
         errors: list[str] = []
         warnings: list[str] = []
-        nodes = self._validate(inv, ha, mon, errors, warnings)
+        networks = self._networks(inv, errors)
+        nodes = self._validate(inv, ha, mon, networks, errors, warnings)
         if errors:
             msg = "\n  - ".join(errors)
             raise AnsibleParserError(f"lab_config: configuration is invalid:\n  - {msg}")
@@ -109,12 +138,45 @@ class InventoryModule(BaseInventoryPlugin):
         mysql = ha.get("mysql") or {}
         ha_mon = ha.get("monitoring") or {}
 
+        used = {n["_network"] for n in nodes}
+        node_cidrs = sorted({c for name in used for c in networks[name]["cidrs"]})
+        extra_sources = [str(c) for c in (mon.get("allowed_sources") or [])]
+        client_cidrs = sorted(set(node_cidrs) | set(extra_sources))
+        client_hosts = sorted({h for h in (mysql_host_pattern(c) for c in client_cidrs) if h})
+
+        provider = ha["ha_provider"]
+        orch = ha.get("orchestrator") or {}
+        router = (ha.get("innodb_cluster") or {}).get("router") or {}
+        mysql_port = int(mysql.get("port", 3306))
+        mesh_ports = {
+            "async-replication": [mysql_port],
+            "semi-sync": [mysql_port],
+            "orchestrator": [mysql_port, int(orch.get("http_port", 3000)), int(orch.get("raft_port", 10008))],
+            "innodb-cluster": [mysql_port],
+            "percona-xtradb-cluster": [mysql_port, 4444, 4567, 4568],
+        }[provider]
+        client_ports = [mysql_port]
+        if provider == "innodb-cluster" and router.get("enabled", True):
+            client_ports.append(int(router.get("rw_port", 6446)))
+            client_ports.append(int(router.get("rw_port", 6446)) + 1)
+        monitoring_ports = [int(ha_mon.get(k, d)) for k, d in
+                            (("node_exporter_port", 9100), ("mysql_exporter_port", 9104), ("lab_collector_port", 9106))]
+
         self.inventory.add_group("mysql_nodes")
         all_vars = {
             "lab_root": lab_root,
             "lab_config_dir": config_dir,
             "lab_environment": env.get("name", "lab"),
-            "lab_network": env.get("network", "tailscale"),
+            "lab_networks": {k: v for k, v in networks.items() if k in used},
+            "lab_uses_tailscale": any(networks[n]["type"] == "tailscale" for n in used),
+            "lab_mixed_networks": len(used) > 1,
+            "lab_unencrypted_networks": sorted(n for n in used if not networks[n]["encrypted"]),
+            "lab_allowed_sources": client_cidrs,
+            "lab_mesh_tcp_ports": mesh_ports,
+            "lab_mesh_udp_ports": [4567] if provider == "percona-xtradb-cluster" else [],
+            "lab_client_tcp_ports": client_ports,
+            "lab_monitoring_tcp_ports": monitoring_ports if bool(ha_mon.get("enabled", True)) else [],
+            "mysql_client_hosts": client_hosts,
             "ha_provider": ha["ha_provider"],
             "mysql_version": str(mysql.get("version", "8.4")),
             "mysql_port": int(mysql.get("port", 3306)),
@@ -141,17 +203,26 @@ class InventoryModule(BaseInventoryPlugin):
             for grp in (
                 f"dc_{group_safe(node['datacenter'])}",
                 f"role_{node['role']}",
+                f"net_{group_safe(node['_network'])}",
             ):
                 self.inventory.add_group(grp)
                 self.inventory.add_child("mysql_nodes", grp)
                 self.inventory.add_host(name, group=grp)
 
+            net = networks[node["_network"]]
+            address = node["_address"]
             hostvars = {
-                "ansible_host": node["fqdn"].rstrip("."),
+                "ansible_host": address,
                 "ansible_user": node_ssh.get("user"),
                 "ansible_port": int(node_ssh.get("port", 22)),
                 "node_name": name,
-                "node_fqdn": node["fqdn"].rstrip("."),
+                "node_fqdn": address,
+                "node_address": address,
+                "node_network": node["_network"],
+                "node_network_type": net["type"],
+                "node_interface": net["interface"],
+                "node_network_cidrs": net["cidrs"],
+                "node_network_encrypted": net["encrypted"],
                 "node_role": node["role"],
                 "node_datacenter": node["datacenter"],
                 "node_server_id": int(node.get("server_id", idx)),
@@ -166,14 +237,54 @@ class InventoryModule(BaseInventoryPlugin):
                 self.inventory.set_variable(name, k, v)
 
     # ------------------------------------------------------------------ #
-    def _validate(self, inv, ha, mon, errors, warnings):
+    def _networks(self, inv, errors):
+        raw = inv.get("networks")
+        if raw is None:
+            raw = {"tailscale": {"type": "tailscale"}}
+        if not isinstance(raw, dict) or not raw:
+            errors.append("inventory.yml: networks must be a mapping of name -> {type, interface, cidrs}")
+            return {}
+        out = {}
+        for name, cfg in raw.items():
+            where = f"inventory.yml: networks.{name}"
+            cfg = cfg or {}
+            if not LABEL_RE.match(str(name)):
+                errors.append(f"{where}: name must match [a-z0-9][a-z0-9_-]*")
+            ntype = cfg.get("type")
+            if ntype not in NETWORK_TYPES:
+                errors.append(f"{where}.type must be one of {sorted(NETWORK_TYPES)}")
+                continue
+            d_iface, d_cidrs, d_enc = NETWORK_TYPES[ntype]
+            iface = cfg.get("interface", d_iface)
+            cidrs = [str(c) for c in (cfg.get("cidrs") or d_cidrs or [])]
+            if not iface:
+                errors.append(f"{where}.interface is required for type {ntype} (e.g. eth1, wg0)")
+            if not cidrs:
+                errors.append(f"{where}.cidrs is required for type {ntype} (the subnet(s) the nodes use)")
+            for c in cidrs:
+                try:
+                    ipaddress.ip_network(c, strict=False)
+                except ValueError:
+                    errors.append(f"{where}: cidr '{c}' is invalid")
+            enc = cfg.get("encrypted", d_enc)
+            if not isinstance(enc, bool):
+                errors.append(f"{where}.encrypted must be true or false")
+            out[str(name)] = {"type": ntype, "interface": iface, "cidrs": cidrs, "encrypted": bool(enc)}
+        return out
+
+    def _validate(self, inv, ha, mon, networks, errors, warnings):
         env = inv.get("environment")
         if not isinstance(env, dict) or not env.get("name"):
             errors.append("inventory.yml: environment.name is required")
         elif not LABEL_RE.match(str(env["name"])):
             errors.append("inventory.yml: environment.name must match [a-z0-9][a-z0-9_-]*")
-        if isinstance(env, dict) and env.get("network", "tailscale") != "tailscale":
-            errors.append("inventory.yml: environment.network must be 'tailscale' (the only supported network)")
+        env = env if isinstance(env, dict) else {}
+        default_net = env.get("network")
+        if default_net is None and len(networks) == 1:
+            default_net = next(iter(networks))
+        if default_net is not None and networks and default_net not in networks:
+            errors.append(f"inventory.yml: environment.network '{default_net}' is not defined in networks "
+                          f"({sorted(networks)})")
 
         ssh = inv.get("ssh")
         if not isinstance(ssh, dict) or not ssh.get("user"):
@@ -196,9 +307,11 @@ class InventoryModule(BaseInventoryPlugin):
             if not isinstance(node, dict):
                 errors.append(f"{where} must be a mapping")
                 continue
-            for field in ("name", "fqdn", "role", "datacenter"):
+            for field in ("name", "role", "datacenter"):
                 if not node.get(field):
                     errors.append(f"{where}.{field} is required")
+            if not (node.get("address") or node.get("fqdn")):
+                errors.append(f"{where}.address is required (hostname, MagicDNS name or IP; 'fqdn' also accepted)")
             name = str(node.get("name", ""))
             where = f"inventory.yml: node '{name or i}'"
             if name:
@@ -207,14 +320,26 @@ class InventoryModule(BaseInventoryPlugin):
                 if name in names:
                     errors.append(f"{where}: duplicate node name")
                 names.add(name)
-            fqdn = str(node.get("fqdn", "")).rstrip(".").lower()
+            net_name = str(node.get("network") or default_net or "")
+            net = networks.get(net_name)
+            if not net_name:
+                errors.append(f"{where}: network is required when several networks are defined")
+            elif net is None:
+                errors.append(f"{where}: network '{net_name}' is not defined in networks ({sorted(networks)})")
+            node["_network"] = net_name
+            fqdn = str(node.get("address") or node.get("fqdn") or "").rstrip(".").lower()
+            node["_address"] = fqdn
             if fqdn:
-                if not FQDN_RE.match(fqdn):
-                    errors.append(f"{where}: fqdn '{fqdn}' is not a valid fully qualified domain name")
-                elif fqdn.endswith("example.ts.net"):
-                    errors.append(f"{where}: fqdn '{fqdn}' is still the example value; set your MagicDNS name")
+                if not (is_ip(fqdn) or HOST_RE.match(fqdn)):
+                    errors.append(f"{where}: address '{fqdn}' is not a valid hostname or IP address")
+                elif fqdn.endswith("example.ts.net") or fqdn.endswith(".example.internal"):
+                    errors.append(f"{where}: address '{fqdn}' is still the example value")
+                elif net and is_ip(fqdn) and not in_cidrs(fqdn, net["cidrs"]):
+                    errors.append(f"{where}: address {fqdn} is outside network '{net_name}' cidrs {net['cidrs']}")
+                elif net and net["type"] == "tailscale" and is_ip(fqdn) and not is_tailscale_ip(fqdn):
+                    errors.append(f"{where}: address {fqdn} is not a Tailscale address")
                 if fqdn in fqdns:
-                    errors.append(f"{where}: duplicate fqdn '{fqdn}'")
+                    errors.append(f"{where}: duplicate address '{fqdn}'")
                 fqdns.add(fqdn)
             role = node.get("role")
             if role and role not in NODE_ROLES:
@@ -230,6 +355,8 @@ class InventoryModule(BaseInventoryPlugin):
             else:
                 ids.add(sid)
             tip = node.get("tailscale_ip")
+            if tip and net and net["type"] != "tailscale":
+                errors.append(f"{where}: tailscale_ip is only valid on a tailscale network")
             if tip:
                 if not is_tailscale_ip(str(tip)):
                     errors.append(f"{where}: tailscale_ip '{tip}' is not in 100.64.0.0/10 or fd7a:115c:a1e0::/48")
@@ -259,6 +386,21 @@ class InventoryModule(BaseInventoryPlugin):
                 )
             if provider in ("innodb-cluster", "percona-xtradb-cluster", "orchestrator") and n % 2 == 0:
                 warnings.append(f"{provider} with an even node count ({n}) does not improve quorum tolerance")
+
+        used = {n.get("_network") for n in nodes if isinstance(n, dict) and n.get("_network") in networks}
+        if len(used) > 1:
+            warnings.append(
+                f"nodes span several networks ({sorted(used)}); every node must reach every other node and this "
+                "machine must reach every node (routing, VPN or Tailscale subnet router). make validate checks it."
+            )
+        plain = sorted(n for n in used if not networks[n]["encrypted"])
+        repl = (ha.get("replication") or {})
+        if plain and repl.get("ssl") is False:
+            errors.append(f"ha.yml: replication.ssl cannot be false while nodes use unencrypted networks {plain}")
+        pxc = ha.get("percona_xtradb_cluster") or {}
+        if plain and ha.get("ha_provider") == "percona-xtradb-cluster" and pxc.get("encrypt_cluster_traffic") is False:
+            errors.append(f"ha.yml: percona_xtradb_cluster.encrypt_cluster_traffic cannot be false on unencrypted "
+                          f"networks {plain}")
 
         mysql = ha.get("mysql") or {}
         if str(mysql.get("version", "8.4")) not in MYSQL_VERSIONS:

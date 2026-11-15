@@ -1,8 +1,8 @@
 ---
-# All nodes must already be in your tailnet. Copy to config/inventory.yml (make init).
+# Copy to config/inventory.yml (make init).
 environment:
   name: lab
-  network: tailscale
+  network: tailnet          # default network for nodes that do not set one
 
 ssh:
   user: ubuntu
@@ -10,20 +10,36 @@ ssh:
   private_key: ~/.ssh/id_ed25519   # omit to use ssh-agent / Tailscale SSH
   # become_password_env: LAB_BECOME_PASSWORD
 
+# Networks the nodes are reachable on. Types:
+#   tailscale - interface tailscale0, Tailscale ranges; Tailscale must run on node and this machine
+#   vpn       - WireGuard/OpenVPN/IPsec you manage; treated as encrypted
+#   private   - plain internal network; the lab enforces TLS for replication, clients and Galera
+# Mixed networks work when every node can reach every other node and this machine reaches every node.
+networks:
+  tailnet:
+    type: tailscale
+  # dc-lan:
+  #   type: private
+  #   interface: eth1          # interface carrying lab traffic (firewall, faults, PXC address)
+  #   cidrs: [10.20.0.0/16]    # subnet(s) of that network; also used for MySQL account host patterns
+
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
-# Optional per node: server_id, tailscale_ip, mysql ({my.cnf option: value}), ssh overrides.
+# address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
+# Optional per node: network, server_id, tailscale_ip, mysql ({my.cnf option: value}), ssh overrides.
 nodes:
   - name: mysql-01
-    fqdn: mysql-01.example.ts.net
+    address: mysql-01.example.ts.net
     role: primary
     datacenter: dc-01
 
   - name: mysql-02
-    fqdn: mysql-02.example.ts.net
+    address: mysql-02.example.ts.net
     role: replica
     datacenter: dc-02
 
   - name: mysql-03
-    fqdn: mysql-03.example.ts.net
+    address: mysql-03.example.ts.net
     role: replica
     datacenter: dc-03
+    # network: dc-lan
+    # address: 10.20.0.13

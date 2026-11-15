@@ -1,21 +1,25 @@
 ---
-# Runs on localhost. Sets lab_node_addresses: {node: address Prometheus and health checks use}.
-- name: Resolve node FQDNs on this machine
+# Runs on localhost. Resolves every node address on this machine and checks it lands in the node's
+# network (Tailscale ranges for tailscale networks, the configured cidrs otherwise).
+# Sets lab_node_addresses: {node: address Prometheus, probes and the benchmark use}.
+- name: Resolve node addresses on this machine
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python }}"
       - -c
       - |
         import ipaddress, json, socket, sys
-        nets = [ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48")]
+        host, cidrs = sys.argv[1], json.loads(sys.argv[2])
+        nets = [ipaddress.ip_network(c, strict=False) for c in cidrs]
         try:
-            infos = socket.getaddrinfo(sys.argv[1], None, proto=socket.IPPROTO_TCP)
+            infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
         except socket.gaierror as e:
-            print(json.dumps({"error": str(e), "addresses": [], "tailscale": []})); sys.exit(0)
+            print(json.dumps({"error": str(e), "addresses": [], "in_network": []})); sys.exit(0)
         addrs = sorted({i[4][0] for i in infos}, key=lambda a: (":" in a, a))
-        ts = [a for a in addrs if any(ipaddress.ip_address(a) in n for n in nets)]
-        print(json.dumps({"addresses": addrs, "tailscale": ts}))
-      - "{{ hostvars[item].node_fqdn }}"
+        inside = [a for a in addrs if any(ipaddress.ip_address(a) in n for n in nets)]
+        print(json.dumps({"addresses": addrs, "in_network": inside}))
+      - "{{ hostvars[item].node_address }}"
+      - "{{ hostvars[item].node_network_cidrs | to_json }}"
   loop: "{{ groups['mysql_nodes'] }}"
   register: lab_dns
   changed_when: false
@@ -24,16 +28,17 @@
   ansible.builtin.set_fact:
     lab_node_dns: "{{ dict(groups['mysql_nodes'] | zip(lab_dns.results | map(attribute='stdout') | map('from_json'))) }}"
 
-- name: Assert every FQDN resolves to a Tailscale address
+- name: Assert every address resolves inside its network
   ansible.builtin.assert:
     that:
-      - lab_node_dns[item].tailscale | length > 0
-      - hostvars[item].node_tailscale_ip == '' or hostvars[item].node_tailscale_ip in lab_node_dns[item].tailscale
+      - lab_node_dns[item].in_network | length > 0
+      - hostvars[item].node_tailscale_ip == '' or hostvars[item].node_tailscale_ip in lab_node_dns[item].in_network
     fail_msg: >-
-      {{ hostvars[item].node_fqdn }} ({{ item }}) resolved to
-      {{ lab_node_dns[item].error | default(lab_node_dns[item].addresses) }}; expected a Tailscale
-      address{{ (' matching tailscale_ip ' ~ hostvars[item].node_tailscale_ip) if hostvars[item].node_tailscale_ip else '' }}.
-      Check MagicDNS and that the node is online (tailscale status).
+      {{ hostvars[item].node_address }} ({{ item }}, network {{ hostvars[item].node_network }}) resolved to
+      {{ lab_node_dns[item].error | default(lab_node_dns[item].addresses) }}; expected an address in
+      {{ hostvars[item].node_network_cidrs }}{{ (' matching tailscale_ip ' ~ hostvars[item].node_tailscale_ip) if hostvars[item].node_tailscale_ip else '' }}.
+      {{ 'Check MagicDNS and that the node is online (tailscale status).' if hostvars[item].node_network_type == 'tailscale'
+         else 'Check DNS/hosts entries on this machine or use the IP address.' }}
     quiet: true
   loop: "{{ groups['mysql_nodes'] }}"
 
@@ -43,9 +48,9 @@
       {%- set out = {} -%}
       {%- for n in groups['mysql_nodes'] -%}
       {%- if (lab_monitoring.scrape_address | default('ip')) == 'fqdn' -%}
-      {%- set _ = out.update({n: hostvars[n].node_fqdn}) -%}
+      {%- set _ = out.update({n: hostvars[n].node_address}) -%}
       {%- else -%}
-      {%- set _ = out.update({n: hostvars[n].node_tailscale_ip or lab_node_dns[n].tailscale[0]}) -%}
+      {%- set _ = out.update({n: hostvars[n].node_tailscale_ip or lab_node_dns[n].in_network[0]}) -%}
       {%- endif -%}
       {%- endfor -%}
       {{ out }}
