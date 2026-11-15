@@ -162,8 +162,9 @@ destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=
 	  [ -n "$$env" ] && [ "$$answer" = "$$env" ] || { echo "aborted"; exit 1; }; \
 	  $(ansible) ansible/playbooks/destroy-ha.yml -e confirm=$$env $(if $(DATA),-e destroy_data=true)
 
-lint: ## ansible-lint, shellcheck, compose config, python compile
+lint: ## ansible-lint, yamllint, shellcheck, compose config, python compile
 	ansible-lint ansible/
+	yamllint -s ansible/engines ansible/playbooks ansible/roles ansible/tasks ansible/inventory config local metrics
 	shellcheck -x -e SC1091 local/scripts/*.sh jmeter/install.sh
 	$(COMPOSE) config -q
 	python3 -I -m py_compile metrics/collectors/*.py benchmark/*/*.py jmeter/build-scenarios.py local/grafana/build-dashboards.py

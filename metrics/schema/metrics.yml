@@ -23,7 +23,8 @@ levels:
     - {name: transaction_duration_seconds, type: histogram, unit: s, side: client, measurement: direct, labels: [side, operation],
        note: "BEGIN..COMMIT without connect. Server-side transaction time is database_transaction_seconds_total (mean only)."}
     - {name: replication_duration_seconds, implemented_as: replication_apply_duration_seconds, type: histogram, unit: s, side: server, measurement: sampled}
-    - {name: storage_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total, node_disk_*_time_seconds_total", type: counter-pair, unit: s, side: server+host, measurement: derived,
+    - {name: storage_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total, node_disk_*_time_seconds_total",
+       type: counter-pair, unit: s, side: server+host, measurement: derived,
        note: "Means only. Per-I/O distributions need eBPF (biolatency), not part of this lab."}
 
   2_subcomponent:
