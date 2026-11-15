@@ -1,0 +1,17 @@
+[Unit]
+Description=mysql-ha-lab node collector
+After=network-online.target mysql.service
+
+[Service]
+User=mysqld_exporter
+Group=mysqld_exporter
+ExecStart=/usr/bin/python3 {{ lab_collector_dir }}/ha_lab_collector.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

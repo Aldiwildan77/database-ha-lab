@@ -1,0 +1,6 @@
+---
+lab_collector_dir: /opt/ha-lab
+lab_collector_files: [promlib.py, netprobe.py, ha_lab_collector.py, network_probe.py]
+lab_collector_default_buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]
+lab_collector_buckets: "{{ (lab_monitoring.histogram_buckets | default({})).server | default(lab_collector_default_buckets) }}"
+lab_network_probe_interval: "{{ lab_monitoring.network_probe_interval | default('30s') }}"

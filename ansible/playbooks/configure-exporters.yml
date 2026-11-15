@@ -12,6 +12,7 @@
   roles:
     - node-exporter
     - mysql-exporter
+    - lab-collector
 
 - name: Verify exporters from this machine over Tailscale
   hosts: localhost
@@ -28,7 +29,7 @@
         timeout: 10
       vars:
         addr: "{{ ('[' ~ lab_node_addresses[item.0] ~ ']') if ':' in lab_node_addresses[item.0] else lab_node_addresses[item.0] }}"
-      loop: "{{ groups['mysql_nodes'] | product([node_exporter_port, mysql_exporter_port]) | list }}"
+      loop: "{{ groups['mysql_nodes'] | product([node_exporter_port, mysql_exporter_port, lab_collector_port]) | list }}"
       loop_control:
         label: "{{ item.0 }}:{{ item.1 }}"
       register: exporter_scrape

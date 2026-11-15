@@ -1,0 +1,101 @@
+---
+# Node-to-node RTT, loss, Tailscale path and (optionally) iperf3 throughput.
+#   -e out=<file.json>   default local/state/network-matrix-<ts>.json
+#   -e iperf=true        add 5 s iperf3 throughput per ordered pair (sequential)
+- name: Measure node-to-node network
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Ping peers
+      ansible.builtin.command:
+        argv: [ping, -n, -q, -c, "{{ ping_count | default(20) }}", -i, "0.2", "{{ hostvars[item].node_fqdn }}"]
+      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      register: nm_ping
+      changed_when: false
+      failed_when: false
+
+    - name: Tailscale ping peers
+      ansible.builtin.command:
+        argv: [tailscale, ping, --c, "3", --timeout, 3s, "{{ hostvars[item].node_fqdn }}"]
+      loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+      register: nm_ts
+      changed_when: false
+      failed_when: false
+
+    - name: Build pair records
+      ansible.builtin.set_fact:
+        nm_pairs: >-
+          {%- set out = [] -%}
+          {%- for p in nm_ping.results -%}
+          {%- set rtt = p.stdout | regex_search('= ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms', '\\1', '\\2', '\\3', '\\4') -%}
+          {%- set loss = p.stdout | regex_search('([\d.]+)% packet loss', '\\1') -%}
+          {%- set ts = (nm_ts.results[loop.index0].stdout_lines | select('search', 'pong') | list | last) | default('') -%}
+          {%- set _ = out.append({
+                'src': inventory_hostname, 'dst': p.item,
+                'src_datacenter': node_datacenter, 'dst_datacenter': hostvars[p.item].node_datacenter,
+                'rtt_min_ms': rtt[0] | float if rtt else none, 'rtt_avg_ms': rtt[1] | float if rtt else none,
+                'rtt_max_ms': rtt[2] | float if rtt else none, 'rtt_mdev_ms': rtt[3] | float if rtt else none,
+                'loss_pct': loss[0] | float if loss else 100.0,
+                'tailscale_path': (ts | regex_search('via (.*) in', '\\1') | first) if ts else 'unreachable',
+                'tailscale_direct': (ts is search('via \\d')) if ts else false }) -%}
+          {%- endfor -%}
+          {{ out }}
+
+- name: Measure throughput (iperf3)
+  hosts: mysql_nodes
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Run iperf3 to each peer
+      when: iperf | default(false) | bool
+      block:
+        - name: Start one-shot iperf3 servers on peers
+          ansible.builtin.command: iperf3 -s -1 -D -p 5201
+          delegate_to: "{{ item }}"
+          loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+          changed_when: true
+
+        - name: Run iperf3 client
+          ansible.builtin.command:
+            argv: [iperf3, -c, "{{ hostvars[item].node_fqdn }}", -p, "5201", -t, "5", -J]
+          loop: "{{ groups['mysql_nodes'] | difference([inventory_hostname]) }}"
+          register: nm_iperf
+          changed_when: false
+          failed_when: false
+
+        - name: Attach throughput
+          ansible.builtin.set_fact:
+            nm_pairs: >-
+              {%- set out = [] -%}
+              {%- for p in nm_pairs -%}
+              {%- set r = nm_iperf.results | selectattr('item', 'equalto', p.dst) | first -%}
+              {%- set bps = ((r.stdout | from_json).end.sum_received.bits_per_second) if (r.rc == 0) else none -%}
+              {%- set _ = out.append(p | combine({'throughput_bps': bps})) -%}
+              {%- endfor -%}
+              {{ out }}
+
+- name: Write network matrix
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Write JSON
+      ansible.builtin.copy:
+        dest: "{{ out | default(lab_root ~ '/local/state/network-matrix-' ~ now(utc=true).strftime('%Y%m%dT%H%M%SZ') ~ '.json') }}"
+        mode: "0644"
+        content: >-
+          {{ {'measured_at': now(utc=true).isoformat(), 'source': 'node-to-node',
+              'pairs': groups['mysql_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten} | to_nice_json }}
+      register: nm_file
+
+    - name: Show matrix
+      ansible.builtin.debug:
+        msg: >-
+          {{ p.src }} -> {{ p.dst }}: rtt avg {{ p.rtt_avg_ms }} ms (min {{ p.rtt_min_ms }}, max {{ p.rtt_max_ms }}),
+          loss {{ p.loss_pct }}%, path {{ p.tailscale_path }}{{ (', ' ~ ((p.throughput_bps / 1e6) | round(1)) ~ ' Mbit/s') if p.throughput_bps | default(none) else '' }}
+      loop: "{{ groups['mysql_nodes'] | map('extract', hostvars, 'nm_pairs') | select('defined') | flatten }}"
+      loop_control:
+        loop_var: p
+        label: "{{ p.src }}->{{ p.dst }}"

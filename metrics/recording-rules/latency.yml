@@ -1,0 +1,61 @@
+# Generated quantile recording rules for the unified metrics (see metrics/schema/metrics.yml).
+groups:
+  - name: lab-latency-quantiles
+    interval: 30s
+    rules:
+      - record: lab:ha_transaction_duration_seconds:p50_1m
+        expr: histogram_quantile(0.5, sum by (ha_provider, scenario, endpoint_type, operation, le) (rate(ha_transaction_duration_seconds_bucket{outcome="success"}[1m])))
+      - record: lab:ha_transaction_duration_seconds:p90_1m
+        expr: histogram_quantile(0.9, sum by (ha_provider, scenario, endpoint_type, operation, le) (rate(ha_transaction_duration_seconds_bucket{outcome="success"}[1m])))
+      - record: lab:ha_transaction_duration_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (ha_provider, scenario, endpoint_type, operation, le) (rate(ha_transaction_duration_seconds_bucket{outcome="success"}[1m])))
+      - record: lab:ha_transaction_duration_seconds:p99_1m
+        expr: histogram_quantile(0.99, sum by (ha_provider, scenario, endpoint_type, operation, le) (rate(ha_transaction_duration_seconds_bucket{outcome="success"}[1m])))
+      - record: lab:commit_duration_seconds_client:p50_1m
+        expr: histogram_quantile(0.5, sum by (ha_provider, scenario, operation, le) (rate(commit_duration_seconds_bucket{side="client"}[1m])))
+      - record: lab:commit_duration_seconds_client:p90_1m
+        expr: histogram_quantile(0.9, sum by (ha_provider, scenario, operation, le) (rate(commit_duration_seconds_bucket{side="client"}[1m])))
+      - record: lab:commit_duration_seconds_client:p95_1m
+        expr: histogram_quantile(0.95, sum by (ha_provider, scenario, operation, le) (rate(commit_duration_seconds_bucket{side="client"}[1m])))
+      - record: lab:commit_duration_seconds_client:p99_1m
+        expr: histogram_quantile(0.99, sum by (ha_provider, scenario, operation, le) (rate(commit_duration_seconds_bucket{side="client"}[1m])))
+      - record: lab:commit_duration_seconds_server:p50_1m
+        expr: histogram_quantile(0.5, sum by (node, le) (rate(commit_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:commit_duration_seconds_server:p90_1m
+        expr: histogram_quantile(0.9, sum by (node, le) (rate(commit_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:commit_duration_seconds_server:p95_1m
+        expr: histogram_quantile(0.95, sum by (node, le) (rate(commit_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:commit_duration_seconds_server:p99_1m
+        expr: histogram_quantile(0.99, sum by (node, le) (rate(commit_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:database_statement_duration_seconds_server:p50_1m
+        expr: histogram_quantile(0.5, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:database_statement_duration_seconds_server:p90_1m
+        expr: histogram_quantile(0.9, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:database_statement_duration_seconds_server:p95_1m
+        expr: histogram_quantile(0.95, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:database_statement_duration_seconds_server:p99_1m
+        expr: histogram_quantile(0.99, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side="server"}[1m])))
+      - record: lab:replication_apply_duration_seconds:p50_1m
+        expr: histogram_quantile(0.5, sum by (node, le) (rate(replication_apply_duration_seconds_bucket[1m])))
+      - record: lab:replication_apply_duration_seconds:p90_1m
+        expr: histogram_quantile(0.9, sum by (node, le) (rate(replication_apply_duration_seconds_bucket[1m])))
+      - record: lab:replication_apply_duration_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (node, le) (rate(replication_apply_duration_seconds_bucket[1m])))
+      - record: lab:replication_apply_duration_seconds:p99_1m
+        expr: histogram_quantile(0.99, sum by (node, le) (rate(replication_apply_duration_seconds_bucket[1m])))
+      - record: lab:network_rtt_seconds:p50_1m
+        expr: histogram_quantile(0.5, sum by (job, node, peer, le) (rate(network_rtt_seconds_bucket[1m])))
+      - record: lab:network_rtt_seconds:p90_1m
+        expr: histogram_quantile(0.9, sum by (job, node, peer, le) (rate(network_rtt_seconds_bucket[1m])))
+      - record: lab:network_rtt_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (job, node, peer, le) (rate(network_rtt_seconds_bucket[1m])))
+      - record: lab:network_rtt_seconds:p99_1m
+        expr: histogram_quantile(0.99, sum by (job, node, peer, le) (rate(network_rtt_seconds_bucket[1m])))
+  - name: lab-availability
+    rules:
+      - record: lab:write_availability:ratio_1m
+        expr: sum by (ha_provider, scenario) (rate(ha_transaction_success_total{operation="write"}[1m])) / sum by (ha_provider, scenario) (rate(ha_transaction_total{operation="write"}[1m]))
+      - record: lab:read_availability:ratio_1m
+        expr: sum by (ha_provider, scenario) (rate(ha_transaction_success_total{operation="read"}[1m])) / sum by (ha_provider, scenario) (rate(ha_transaction_total{operation="read"}[1m]))
+      - record: lab:writable_nodes:count
+        expr: sum by (environment, ha_provider) (ha_lab_writable)

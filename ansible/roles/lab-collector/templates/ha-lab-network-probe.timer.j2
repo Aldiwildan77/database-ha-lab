@@ -1,0 +1,10 @@
+[Unit]
+Description=Run mysql-ha-lab network probe every {{ lab_network_probe_interval }}
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ lab_network_probe_interval }}
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

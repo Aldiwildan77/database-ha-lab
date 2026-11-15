@@ -1,6 +1,6 @@
 {
   "uid": "lab-mysql-overview",
-  "title": "MySQL Overview",
+  "title": "MySQL Performance",
   "tags": [
     "mysql-ha-lab",
     "mysql"
@@ -89,7 +89,25 @@
     ]
   },
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "name": "Benchmark runs",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "iconColor": "rgba(255, 152, 48, 0.8)",
+        "target": {
+          "type": "tags",
+          "tags": [
+            "benchmark"
+          ],
+          "limit": 100,
+          "matchAny": true
+        }
+      }
+    ]
   },
   "panels": [
     {
@@ -1294,6 +1312,129 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "Server statement latency (Performance Schema)",
+      "id": 27,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side=\"server\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (node, le) (rate(database_statement_duration_seconds_bucket{side=\"server\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Server commit latency (Performance Schema)",
+      "id": 28,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (node, le) (rate(commit_duration_seconds_bucket{side=\"server\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (node, le) (rate(commit_duration_seconds_bucket{side=\"server\",environment=~\"$environment\",datacenter=~\"$datacenter\",node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Explicit COMMIT statements. Includes redo/binlog flush and semi-sync, Group Replication or Galera certification waits."
     }
   ]
 }

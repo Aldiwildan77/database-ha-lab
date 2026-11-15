@@ -1,0 +1,7 @@
+[Unit]
+Description=mysql-ha-lab node-to-node network probe
+After=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {{ lab_collector_dir }}/network_probe.py

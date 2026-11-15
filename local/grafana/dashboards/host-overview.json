@@ -89,7 +89,25 @@
     ]
   },
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "name": "Benchmark runs",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "iconColor": "rgba(255, 152, 48, 0.8)",
+        "target": {
+          "type": "tags",
+          "tags": [
+            "benchmark"
+          ],
+          "limit": 100,
+          "matchAny": true
+        }
+      }
+    ]
   },
   "panels": [
     {

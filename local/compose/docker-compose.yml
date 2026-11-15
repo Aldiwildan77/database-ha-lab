@@ -13,7 +13,10 @@ services:
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../prometheus/rules:/etc/prometheus/rules:ro
       - ../prometheus/targets:/etc/prometheus/targets:ro
+      - ../../metrics/recording-rules:/etc/prometheus/recording-rules:ro
       - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
       - 127.0.0.1:${PROMETHEUS_PORT:-9090}:9090
     restart: unless-stopped

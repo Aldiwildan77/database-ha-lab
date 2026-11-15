@@ -1,0 +1,60 @@
+---
+- name: Create collector directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["{{ lab_collector_dir }}", /etc/ha-lab, /var/lib/ha-lab]
+
+- name: Install collector scripts
+  ansible.builtin.copy:
+    src: "{{ lab_root }}/metrics/collectors/{{ item }}"
+    dest: "{{ lab_collector_dir }}/{{ item }}"
+    mode: "0755"
+  loop: "{{ lab_collector_files }}"
+  notify: Restart ha-lab-collector
+
+- name: Write collector configuration
+  ansible.builtin.copy:
+    dest: /etc/ha-lab/collector.json
+    owner: mysqld_exporter
+    group: mysqld_exporter
+    mode: "0600"
+    content: "{{ {'user': 'exporter', 'password': mysql_exporter_password, 'socket': '/var/run/mysqld/mysqld.sock',
+                  'port': lab_collector_port, 'buckets': lab_collector_buckets} | to_nice_json }}\n"
+  no_log: true
+  notify: Restart ha-lab-collector
+
+- name: Build peer list
+  ansible.builtin.set_fact:
+    lab_probe_peers: >-
+      {%- set out = [] -%}
+      {%- for h in groups['mysql_nodes'] | difference([inventory_hostname]) -%}
+      {%- set _ = out.append({'name': h, 'address': hostvars[h].node_fqdn, 'datacenter': hostvars[h].node_datacenter}) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Write network probe configuration
+  ansible.builtin.copy:
+    dest: /etc/ha-lab/network-probe.json
+    mode: "0644"
+    content: >-
+      {{ {'self': inventory_hostname, 'port': mysql_port,
+          'textfile': '/var/lib/node_exporter/textfile/ha_lab_network.prom',
+          'state': '/var/lib/ha-lab/network-state.json', 'peers': lab_probe_peers} | to_nice_json }}
+
+- name: Install systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [ha-lab-collector.service, ha-lab-network-probe.service, ha-lab-network-probe.timer]
+  notify: Restart ha-lab-collector
+
+- name: Start collector and probe timer
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: [ha-lab-collector.service, ha-lab-network-probe.timer]

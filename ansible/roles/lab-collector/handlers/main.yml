@@ -1,0 +1,6 @@
+---
+- name: Restart ha-lab-collector
+  ansible.builtin.systemd_service:
+    name: ha-lab-collector
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,93 @@
+# Unified hierarchical metric catalogue.
+# measurement: direct (measured as the value itself) | derived (computed from other measurements) | sampled (subset of events)
+# side: client = benchmark machine (JMeter), server = MySQL node, host = OS, network = probes
+# Labels on every remote series come from Prometheus targets: environment, ha_provider, node, role, datacenter, job.
+# Client series carry: environment, ha_provider, scenario, endpoint_type, operation. run_id is never a label.
+
+levels:
+  0_unified:
+    - {name: ha_transaction_duration_seconds, type: histogram, unit: s, side: client, measurement: direct,
+       source: jmeter/scripts/transaction.groovy (System.nanoTime around connect+statements+commit),
+       labels: [operation, outcome], note: "Measured directly, never summed from components."}
+    - {name: ha_transaction_total, type: counter, side: client, measurement: direct, labels: [operation]}
+    - {name: ha_transaction_success_total, type: counter, side: client, measurement: direct, labels: [operation]}
+    - {name: ha_transaction_errors_total, type: counter, side: client, measurement: direct, labels: [operation, error_class],
+       note: "error_class is bounded: connection, timeout, read_only, deadlock, lock_timeout, duplicate, conflict, not_ready, commit_unknown, other"}
+
+  1_component:
+    - {name: connection_duration_seconds, type: histogram, unit: s, side: client, measurement: direct,
+       note: "Only observed when the sampler (re)connects; includes TCP, TLS, auth and writable-endpoint discovery."}
+    - {name: network_duration_seconds, implemented_as: network_rtt_seconds, type: histogram, unit: s, side: network, measurement: direct,
+       note: "ICMP RTT per probe. Query/response transfer time inside a transaction is not separable from client statement time."}
+    - {name: database_duration_seconds, implemented_as: 'database_statement_duration_seconds{side="server"}', type: histogram, unit: s, side: server, measurement: direct}
+    - {name: transaction_duration_seconds, type: histogram, unit: s, side: client, measurement: direct, labels: [side, operation],
+       note: "BEGIN..COMMIT without connect. Server-side transaction time is database_transaction_seconds_total (mean only)."}
+    - {name: replication_duration_seconds, implemented_as: replication_apply_duration_seconds, type: histogram, unit: s, side: server, measurement: sampled}
+    - {name: storage_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total, node_disk_*_time_seconds_total", type: counter-pair, unit: s, side: server+host, measurement: derived,
+       note: "Means only. Per-I/O distributions need eBPF (biolatency), not part of this lab."}
+
+  2_subcomponent:
+    connection:
+      - {name: connection_pool_wait_seconds, available: false, note: "The sampler holds one connection per thread; there is no pool, so wait is zero by design."}
+      - {name: tcp_connect_duration_seconds, type: histogram, unit: s, side: network, measurement: direct, labels: [peer, peer_datacenter], source: "local_probe.py, network_probe.py"}
+      - {name: connection_errors_total, type: counter, side: client, measurement: direct}
+      - {name: active_connections, implemented_as: "benchmark_active_threads (client), mysql_global_status_threads_connected (server)", type: gauge}
+    network:
+      - {name: network_rtt_seconds, type: histogram, unit: s, measurement: direct, labels: [peer, peer_datacenter]}
+      - {name: network_transfer_duration_seconds, available: false, note: "Not separable from statement time at the client; see iperf3 throughput in network-matrix."}
+      - {name: network_retransmissions_total, implemented_as: node_netstat_Tcp_RetransSegs, type: counter, side: host}
+      - {name: network_packet_loss_ratio, type: gauge, measurement: direct, labels: [peer]}
+      - {name: network_throughput_bytes_per_second, implemented_as: "rate(node_network_*_bytes_total{device=\"tailscale0\"}); iperf3 on demand", type: derived}
+      - {name: network_tailscale_direct, type: gauge, note: "1 direct WireGuard path, 0 DERP relay"}
+    database:
+      - {name: database_statement_duration_seconds, type: histogram, unit: s, labels: [side], measurement: direct,
+         source: "server: performance_schema.events_statements_histogram_global; client: sampler exec_ns"}
+      - {name: database_query_execution_seconds, implemented_as: 'database_statement_duration_seconds{side="server"}'}
+      - {name: database_lock_wait_seconds_total, type: counter, unit: s, side: server, measurement: direct, note: "Innodb_row_lock_time, ms resolution; histogram not available."}
+      - {name: database_lock_waits_total, type: counter, side: server}
+      - {name: database_deadlocks_total, type: counter, side: server, source: INNODB_METRICS lock_deadlocks}
+    transaction:
+      - {name: transaction_execution_seconds, implemented_as: 'database_statement_duration_seconds{side="client"}', note: "statements inside the transaction"}
+      - {name: commit_duration_seconds, type: histogram, unit: s, labels: [side], measurement: direct,
+         source: "client: conn.commit(); server: events_statements_histogram_by_digest for COMMIT"}
+      - {name: rollback_duration_seconds, type: histogram, unit: s, side: client, measurement: direct}
+      - {name: transaction_errors_total, implemented_as: ha_transaction_errors_total}
+    replication:
+      - {name: replication_apply_duration_seconds, type: histogram, unit: s, measurement: sampled, labels: [channel],
+         note: "Last applied transaction per worker, once per scrape."}
+      - {name: replication_end_to_end_delay_seconds, type: histogram, unit: s, measurement: sampled, note: "Crosses clocks."}
+      - {name: replication_lag_seconds, type: gauge, unit: s, measurement: derived, note: "now - original commit of the oldest applying transaction; crosses clocks."}
+      - {name: replication_queue_size, type: gauge, labels: [queue], note: "relay_log | certification | applier | wsrep_recv | wsrep_send"}
+      - {name: replication_errors_total, implemented_as: replication_last_error_number, type: gauge, note: "MySQL exposes the last error, not a count."}
+      - {name: replication_certification_conflicts_total, type: counter, providers: [innodb-cluster]}
+    storage:
+      - {name: fsync_duration_seconds, implemented_as: "storage_fsync_seconds_total / storage_fsync_total {file=redo|data|binlog}", measurement: derived}
+      - {name: disk_read_duration_seconds, implemented_as: "rate(node_disk_read_time_seconds_total) / rate(node_disk_reads_completed_total)", measurement: derived}
+      - {name: disk_write_duration_seconds, implemented_as: "rate(node_disk_write_time_seconds_total) / rate(node_disk_writes_completed_total)", measurement: derived}
+      - {name: disk_iops, implemented_as: "rate(node_disk_reads_completed_total + node_disk_writes_completed_total)", measurement: derived}
+      - {name: disk_read_bytes_per_second, implemented_as: rate(node_disk_read_bytes_total)}
+      - {name: disk_write_bytes_per_second, implemented_as: rate(node_disk_written_bytes_total)}
+
+  3_resource:
+    source: node_exporter (job=node)
+    metrics: [node_cpu_seconds_total, node_load1, node_memory_MemAvailable_bytes, node_memory_Swap*, node_disk_*, node_filesystem_*,
+              node_network_*_bytes_total, node_netstat_Tcp_RetransSegs, node_network_*_errs_total, node_network_*_drop_total,
+              node_pressure_*, node_timex_offset_seconds, node_timex_sync_status]
+    recording_rules: local/prometheus/rules/lab.yml
+
+  4_ha:
+    topology (ha_lab_collector, all providers): [ha_lab_mysql_up, ha_lab_writable, ha_lab_read_only, ha_lab_super_read_only, ha_lab_gtid_executed_transactions]
+    async_semi_sync:
+      collector: [ha_lab_replica_configured, ha_lab_replica_io_running, ha_lab_replica_sql_running, ha_lab_semi_sync_source_active]
+      mysqld_exporter: [mysql_slave_status_seconds_behind_source, mysql_slave_status_relay_log_space, mysql_slave_status_retrieved_gtid_set (label),
+                        mysql_global_status_rpl_semi_sync_source_yes_tx, mysql_global_status_rpl_semi_sync_source_no_tx,
+                        mysql_global_status_rpl_semi_sync_source_tx_avg_wait_time, mysql_global_status_rpl_semi_sync_source_clients]
+    group_replication:
+      collector: [ha_lab_group_members, ha_lab_group_member_online, ha_lab_group_primary, replication_queue_size, replication_certification_conflicts_total]
+      mysqld_exporter: [mysql_perf_schema_replication_group_member_info, mysql_perf_schema_transactions_in_queue,
+                        mysql_perf_schema_transactions_remote_applier_queue, mysql_perf_schema_conflicts_detected]
+      unavailable: ["Flow control throttling time: not exposed by Performance Schema; inspect group_replication_flow_control_* variables and applier queue growth."]
+    galera:
+      collector: [ha_lab_wsrep_ready, ha_lab_wsrep_primary_component, ha_lab_wsrep_cluster_size, replication_queue_size]
+      mysqld_exporter: [mysql_global_status_wsrep_flow_control_paused, mysql_global_status_wsrep_local_cert_failures,
+                        mysql_global_status_wsrep_cluster_size, mysql_global_status_wsrep_local_state, mysql_global_status_wsrep_connected]
