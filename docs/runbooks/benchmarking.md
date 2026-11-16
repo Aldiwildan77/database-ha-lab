@@ -3,9 +3,20 @@
 ## One-time setup
 
 ```bash
-make jmeter-install     # JMeter 5.6.3 + Connector/J into local/tools (needs Java 8+)
+make jmeter-install     # JMeter 5.6.3, the engine's JDBC driver and plugins into local/tools (Java 8+)
 make monitoring         # Prometheus, Grafana, local client probe
 ```
+
+Plugins installed by `jmeter/install.sh`, available to any plan you write or open in the JMeter GUI:
+
+| Plugin | Adds |
+|---|---|
+| Custom Thread Groups (`jpgc-casutg`) | Concurrency, Arrivals, Free-Form Arrivals and Ultimate thread groups (step load, fixed arrival rate) |
+| Throughput Shaping Timer (`jpgc-tst`) | A requests-per-second profile over time |
+| Dummy Sampler (`jpgc-dummy`) | A sampler that needs no database, for testing plans and the report pipeline |
+| Plugins Manager | Options → Plugins Manager in the GUI, or `local/tools/jmeter/bin/PluginsManagerCMD.sh`, to add other plugins |
+
+The generated `jmeter/scenarios/*.jmx` use core JMeter elements only. Plugins added through the Plugins Manager are not pinned or checksum-verified; add them to `jmeter/install.sh` to keep a lab reproducible.
 
 Also check these settings:
 - `db_benchmark_password` is set. `make provision` creates the `bench` account from it.
