@@ -8,15 +8,6 @@ dataset:
   seed: 42
 
 load:                           # defaults for every scenario (JMeter properties)
-  # standard: fixed threads (closed model; core JMeter).
-  # concurrency: Concurrency Thread Group, `threads` reached in `steps` steps over the ramp-up (step load).
-  # arrivals: Arrivals Thread Group, `rate` new transactions per second whatever the response time (open model).
-  #   A stalled primary then shows its full impact instead of throttling the load; `max_concurrency` caps threads.
-  # concurrency and arrivals need the Custom Thread Groups plugin (make jmeter-install installs it).
-  thread_group: standard
-  steps: 0                      # concurrency/arrivals: 0 = smooth ramp
-  rate: 100                     # arrivals: transactions per second
-  max_concurrency: 500          # arrivals: thread cap
   threads: 16
   ramp_up_seconds: 30
   duration_seconds: 300

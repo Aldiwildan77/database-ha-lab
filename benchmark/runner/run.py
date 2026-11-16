@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
-import glob
 import json
 import os
 import re
@@ -32,7 +31,6 @@ import netprobe  # noqa: E402
 
 SCENARIOS = ["baseline", "read-heavy", "write-heavy", "mixed-workload", "spike-test", "soak-test",
              "failover-test", "network-disruption"]
-THREAD_GROUPS = ["standard", "concurrency", "arrivals"]   # concurrency/arrivals need the Custom Thread Groups plugin
 FAULT_ALIASES = {"stop-mysql": "stop-db", "kill-mysql": "kill-db"}   # old names still accepted
 FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", *FAULT_ALIASES]
 SCENARIO_FAULT = {"failover-test": "stop-db", "network-disruption": "netem"}
@@ -208,7 +206,6 @@ def main():
     ap.add_argument("--no-promote", action="store_true", help="async/semi-sync: never promote; measure the outage")
     ap.add_argument("--confirm", default="", help="'yes' is required for faults")
     ap.add_argument("--warmup", type=float, default=None)
-    ap.add_argument("--thread-group", choices=THREAD_GROUPS, help="override load.thread_group from config/benchmark.yml")
     ap.add_argument("--skip-prepare", action="store_true")
     ap.add_argument("--skip-network", action="store_true")
     ap.add_argument("--iperf", action="store_true")
@@ -235,9 +232,6 @@ def main():
     bench = ctx.get("benchmark_config") or {}
     load_cfg = {**(bench.get("load") or {}), **((bench.get("scenarios") or {}).get(a.scenario) or {})}
     dataset = bench.get("dataset") or {}
-    thread_group = a.thread_group or str(load_cfg.get("thread_group", "standard"))
-    if thread_group not in THREAD_GROUPS:
-        raise SystemExit(f"load.thread_group '{thread_group}' is not one of {', '.join(THREAD_GROUPS)}")
 
     props = {
         "run_id": run_id, "endpoints": ",".join(ctx["endpoint"]["endpoints"]), "endpoint_mode": ctx["endpoint"]["mode"],
@@ -249,8 +243,7 @@ def main():
               "reads_per_txn": "reads_per_txn", "think_ms": "think_ms", "spike_threads": "spike_threads",
               "spike_at_seconds": "spike_at", "spike_duration_seconds": "spike_duration",
               "socket_timeout_ms": "socket_timeout_ms", "connect_timeout_ms": "connect_timeout_ms",
-              "reconnect_backoff_ms": "reconnect_backoff_ms", "rate": "rate", "max_concurrency": "max_concurrency",
-              "steps": "steps"}
+              "reconnect_backoff_ms": "reconnect_backoff_ms"}
     for k, v in load_cfg.items():
         if k in keymap:
             props[keymap[k]] = v
@@ -259,17 +252,6 @@ def main():
         props[k] = v
     duration = float(props.get("duration", 300))
     warmup = a.warmup if a.warmup is not None else float(props.get("rampup", 0))
-    # Plugin thread groups run for RampUp + Hold; keep the total equal to duration.
-    if "duration" in props:
-        props.setdefault("hold", max(0, int(duration - float(props.get("rampup", 0)))))
-
-    plan_file = os.path.join(ROOT, "jmeter", "scenarios", f"{a.scenario}.jmx")
-    if thread_group != "standard":
-        if not glob.glob(os.path.join(ROOT, "local", "tools", "jmeter", "lib", "ext", "jmeter-plugins-casutg-*.jar")):
-            raise SystemExit(f"thread_group {thread_group} needs the Custom Thread Groups plugin: run make jmeter-install")
-        subprocess.run([sys.executable, "-I", os.path.join(ROOT, "jmeter", "build-scenarios.py"), "--thread-group", thread_group,
-                        "--scenario", a.scenario, "--out", run_dir], check=True, capture_output=True)
-        plan_file = os.path.join(run_dir, f"{a.scenario}.jmx")
 
     secret = os.path.join(run_dir, "secret.properties")
     jcommon = [jmeter, "-n", "-q", os.path.join(ROOT, "jmeter", "lab.properties"), "-q", secret]
@@ -309,7 +291,6 @@ def main():
         "run_id": run_id, "scenario": a.scenario, "ha_provider": ctx["ha_provider"], "environment": ctx["environment"],
         "client_location": ctx["client_location"], "endpoint": ctx["endpoint"], "initial_primary": primary,
         "fault": fault, "fault_node": fault_node if fault != "none" else None, "warmup_s": warmup,
-        "thread_group": thread_group,
         "jmeter_properties": {k: v for k, v in props.items() if k not in ("lab_script_dir",)},
         "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         "measurement_clock": "client wall clock (UTC) for events; System.nanoTime() for durations",
@@ -324,9 +305,8 @@ def main():
     started = now()
     meta.update({"started_at": iso(started), "started_at_epoch": started})
     ann = grafana_annotation(run_id, a.scenario, int(started * 1000))
-    level = f"{props.get('rate', 'default')}/s arrivals" if thread_group == "arrivals" else f"{props.get('threads', 'default')} threads"
-    log(f"starting {a.scenario} ({thread_group}): {level}, {duration:.0f}s, endpoint {ctx['endpoint']['type']}")
-    jm = subprocess.Popen(jcommon + ["-t", plan_file,
+    log(f"starting {a.scenario}: {props.get('threads', 'default')} threads, {duration:.0f}s, endpoint {ctx['endpoint']['type']}")
+    jm = subprocess.Popen(jcommon + ["-t", os.path.join(ROOT, "jmeter", "scenarios", f"{a.scenario}.jmx"),
                                      "-l", jtl, "-j", os.path.join(run_dir, "jmeter.log")],
                           stdout=open(os.path.join(run_dir, "jmeter.out"), "w"), stderr=subprocess.STDOUT)
 

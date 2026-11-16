@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs Apache JMeter, the JDBC driver of one engine and the Custom Thread Groups plugin into local/tools
+# Installs Apache JMeter, the JDBC driver of one engine and the JMeter plugins below into local/tools
 # (checksums verified).
 #   jmeter/install.sh [engine]      engine defaults to mysql; drivers are listed in jmeter/drivers/<engine>.env
 set -euo pipefail
@@ -8,10 +8,14 @@ TOOLS="${ROOT}/local/tools"
 JMETER_VERSION=5.6.3
 JMETER_SHA512=5978a1a35edb5a7d428e270564ff49d2b1b257a65e17a759d259a9283fc17093e522fe46f474a043864aea6910683486340706d745fcdf3db1505fd71e689083
 ENGINE="${1:-mysql}"
-# Custom Thread Groups (jpgc-casutg): Concurrency and Arrivals thread groups, used when load.thread_group is not
-# standard. Installed from Maven Central the way the Plugins Manager lays them out.
-CASUTG_VERSION=3.1.1
-CMN_JMETER_VERSION=0.7
+# JMeter plugins, pinned and installed from Maven Central the way the Plugins Manager lays them out
+# (plugins in lib/ext, shared libraries in lib):
+#   jpgc-casutg  Custom Thread Groups: Concurrency, Arrivals, Free-Form Arrivals, Ultimate
+#   jpgc-tst     Throughput Shaping Timer: requests/second profile over time
+#   jpgc-dummy   Dummy Sampler: exercise a plan or the report pipeline without a database
+#   Plugins Manager + cmdrunner: add other plugins from the GUI or bin/PluginsManagerCMD.sh
+PLUGINS_EXT=(jmeter-plugins-casutg:3.1.1 jmeter-plugins-tst:2.6 jmeter-plugins-dummy:0.4 jmeter-plugins-manager:1.11)
+PLUGINS_LIB=(jmeter-plugins-cmn-jmeter:0.7 cmdrunner:2.3)
 
 [[ "$ENGINE" =~ ^[a-z0-9_]+$ ]] || { echo "invalid engine name: $ENGINE"; exit 1; }
 DRIVER_FILE="${ROOT}/jmeter/drivers/${ENGINE}.env"
@@ -44,7 +48,12 @@ maven_jar() {
   curl -fsSL -o "$dest" "$url"
   echo "$(curl -fsSL "${url}.sha1")  ${dest}" | shasum -a 1 -c - >/dev/null || { rm -f "$dest"; exit 1; }
 }
-maven_jar kg/apc jmeter-plugins-cmn-jmeter "$CMN_JMETER_VERSION" "apache-jmeter-${JMETER_VERSION}/lib"
-maven_jar kg/apc jmeter-plugins-casutg "$CASUTG_VERSION" "apache-jmeter-${JMETER_VERSION}/lib/ext"
+for p in "${PLUGINS_LIB[@]}"; do maven_jar kg/apc "${p%%:*}" "${p##*:}" "apache-jmeter-${JMETER_VERSION}/lib"; done
+for p in "${PLUGINS_EXT[@]}"; do maven_jar kg/apc "${p%%:*}" "${p##*:}" "apache-jmeter-${JMETER_VERSION}/lib/ext"; done
+if [[ ! -x "apache-jmeter-${JMETER_VERSION}/bin/PluginsManagerCMD.sh" ]]; then
+  manager="$(printf '%s\n' "${PLUGINS_EXT[@]}" | grep '^jmeter-plugins-manager:')"
+  java -cp "apache-jmeter-${JMETER_VERSION}/lib/ext/jmeter-plugins-manager-${manager##*:}.jar" \
+    org.jmeterplugins.repository.PluginManagerCMDInstaller >/dev/null
+fi
 ln -sfn "apache-jmeter-${JMETER_VERSION}" jmeter
-echo "JMeter ready: ${TOOLS}/jmeter/bin/jmeter (JDBC driver: ${DRIVER_ARTIFACT} ${DRIVER_VERSION}; Custom Thread Groups ${CASUTG_VERSION})"
+echo "JMeter ready: ${TOOLS}/jmeter/bin/jmeter (JDBC driver: ${DRIVER_ARTIFACT} ${DRIVER_VERSION}; plugins: ${PLUGINS_EXT[*]%%:*})"

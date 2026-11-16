@@ -3,9 +3,20 @@
 ## One-time setup
 
 ```bash
-make jmeter-install     # JMeter 5.6.3, the engine's JDBC driver and Custom Thread Groups into local/tools (Java 8+)
+make jmeter-install     # JMeter 5.6.3, the engine's JDBC driver and plugins into local/tools (Java 8+)
 make monitoring         # Prometheus, Grafana, local client probe
 ```
+
+Plugins installed by `jmeter/install.sh`, available to any plan you write or open in the JMeter GUI:
+
+| Plugin | Adds |
+|---|---|
+| Custom Thread Groups (`jpgc-casutg`) | Concurrency, Arrivals, Free-Form Arrivals and Ultimate thread groups (step load, fixed arrival rate) |
+| Throughput Shaping Timer (`jpgc-tst`) | A requests-per-second profile over time |
+| Dummy Sampler (`jpgc-dummy`) | A sampler that needs no database, for testing plans and the report pipeline |
+| Plugins Manager | Options → Plugins Manager in the GUI, or `local/tools/jmeter/bin/PluginsManagerCMD.sh`, to add other plugins |
+
+The generated `jmeter/scenarios/*.jmx` use core JMeter elements only. Plugins added through the Plugins Manager are not pinned or checksum-verified; add them to `jmeter/install.sh` to keep a lab reproducible.
 
 Also check these settings:
 - `db_benchmark_password` is set. `make provision` creates the `bench` account from it.
@@ -26,20 +37,6 @@ make benchmark SCENARIO=spike-test J="spike_threads=128 spike_at=90"
 | `<node>` | direct | One specific node, for isolated diagnostics |
 
 Reports label the endpoint type. Never compare direct and HA results without stating which is which.
-
-## Thread groups
-
-`load.thread_group` in `config/benchmark.yml` (or `RUN_ARGS="--thread-group arrivals"`) picks the load model:
-
-| `thread_group` | Element | Load is set by | Use for |
-|---|---|---|---|
-| `standard` (default) | core Thread Group | `threads` | Comparable runs; the committed `jmeter/scenarios/*.jmx` |
-| `concurrency` | Concurrency Thread Group (plugin) | `threads`, reached in `steps` over `ramp_up_seconds` | Step load, finding the saturation point |
-| `arrivals` | Arrivals Thread Group (plugin) | `rate` transactions per second, at most `max_concurrency` threads | Failover and latency tests |
-
-With a fixed thread count, a stalled primary also stalls the client: fewer requests are sent, so the outage looks smaller than it is (coordinated omission). `arrivals` keeps starting transactions at `rate` during the stall, up to `max_concurrency` threads, so latency and error counts show the full impact. Set `max_concurrency` to at least `rate` x the longest stall you expect, in seconds.
-
-For a plugin mode, the runner generates the plan into the run directory (`benchmark/results/<run>/<scenario>.jmx`) and records `thread_group` in `metadata.json`. The spike group of `spike-test` stays a standard group in every mode. Compare runs only within one thread group.
 
 ## What a run does
 

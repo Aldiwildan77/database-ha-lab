@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
 """Generates jmeter/scenarios/*.jmx. All scenarios share scripts/transaction.groovy; they differ in
-thread groups and default read ratio. Every default can be overridden with -J<property>.
+thread groups and default read ratio. Every default can be overridden with -J<property>."""
 
-  build-scenarios.py                                    committed plans (standard thread groups)
-  build-scenarios.py --thread-group arrivals --out DIR  plans whose load group is a Custom Thread Groups
-                                                        plugin group (concurrency | arrivals); the runner
-                                                        writes these into the run directory
-"""
-
-import argparse
 import os
 from xml.sax.saxutils import escape
 
@@ -46,36 +39,6 @@ def thread_group(name, threads, rampup, duration, delay, sampler):
       </hashTree>"""
 
 
-# Custom Thread Groups (jpgc-casutg). Both run for RampUp + Hold seconds; the runner sets hold = duration - rampup
-# so the total matches a standard group. Steps 0 ramps smoothly.
-#   concurrency: TargetLevel = concurrent threads (step load).
-#   arrivals:    TargetLevel = new transactions per second, whatever the response time (open model), so a stalled
-#                primary shows its full impact instead of throttling the load. ConcurrencyLimit caps the threads.
-PLUGIN_GROUPS = {
-    "concurrency": ("com.blazemeter.jmeter.threads.concurrency.ConcurrencyThreadGroup", "${__P(threads,%s)}", ""),
-    "arrivals": ("com.blazemeter.jmeter.threads.arrivals.ArrivalsThreadGroup", "${__P(rate,%s)}",
-                 '\n        <stringProp name="ConcurrencyLimit">${__P(max_concurrency,500)}</stringProp>'),
-}
-
-
-def plugin_group(kind, name, level, rampup, hold, sampler):
-    cls, target, extra = PLUGIN_GROUPS[kind]
-    return f"""
-      <{cls} guiclass="{cls}Gui" testclass="{cls}" testname="{name}">
-        <elementProp name="ThreadGroup.main_controller" elementType="com.blazemeter.jmeter.control.VirtualUserController"/>
-        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
-        <stringProp name="TargetLevel">{target % level}</stringProp>
-        <stringProp name="RampUp">{rampup}</stringProp>
-        <stringProp name="Steps">${{__P(steps,0)}}</stringProp>
-        <stringProp name="Hold">{hold}</stringProp>
-        <stringProp name="LogFilename"></stringProp>
-        <stringProp name="Iterations"></stringProp>
-        <stringProp name="Unit">S</stringProp>{extra}
-      </{cls}>
-      <hashTree>{sampler}
-      </hashTree>"""
-
-
 def sampler(name, script, params):
     return f"""
         <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="{name}">
@@ -108,38 +71,22 @@ def plan(name, groups):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--thread-group", choices=["standard"] + sorted(PLUGIN_GROUPS), default="standard")
-    ap.add_argument("--out", default=os.path.join(HERE, "scenarios"))
-    ap.add_argument("--scenario", choices=sorted(SCENARIOS), help="generate only this scenario (and no prepare plan)")
-    a = ap.parse_args()
-    out = a.out
-    os.makedirs(out, exist_ok=True)
-    selected = {a.scenario: SCENARIOS[a.scenario]} if a.scenario else SCENARIOS
-    for name, (ratio, threads, rampup, duration, extra) in selected.items():
+    out = os.path.join(HERE, "scenarios")
+    for name, (ratio, threads, rampup, duration, extra) in SCENARIOS.items():
         s = sampler("transaction", "transaction.groovy", ratio)
-        if a.thread_group == "standard":
-            groups = thread_group("load", f"${{__P(threads,{threads})}}", f"${{__P(rampup,{rampup})}}",
-                                  f"${{__P(duration,{duration})}}", "0", s)
-        else:
-            level = threads if a.thread_group == "concurrency" else threads * 10
-            groups = plugin_group(a.thread_group, "load", level, f"${{__P(rampup,{rampup})}}",
-                                  f"${{__P(hold,{max(0, duration - rampup)})}}", s)
-        # The spike group stays a standard group in every mode: a fixed burst of threads at spike_at.
+        groups = thread_group("load", f"${{__P(threads,{threads})}}", f"${{__P(rampup,{rampup})}}",
+                              f"${{__P(duration,{duration})}}", "0", s)
         if "spike" in extra:
             groups += thread_group("spike", "${__P(spike_threads,64)}", "${__P(spike_rampup,1)}",
                                    "${__P(spike_duration,60)}", "${__P(spike_at,120)}", s)
         with open(os.path.join(out, f"{name}.jmx"), "w") as fh:
             fh.write(plan(name, groups))
-    if a.scenario:
-        print("generated", out, name, a.thread_group)
-        return
     prep = thread_group("prepare", "1", "0", "${__P(prepare_timeout,1800)}", "0",
                         sampler("prepare", "prepare.groovy", ""))
     prep = prep.replace('<intProp name="LoopController.loops">-1</intProp>', '<intProp name="LoopController.loops">1</intProp>')
     with open(os.path.join(out, "prepare.jmx"), "w") as fh:
         fh.write(plan("prepare", prep))
-    print("generated", len(selected) + 1, "plans", a.thread_group)
+    print("generated", len(SCENARIOS) + 1, "plans")
 
 
 if __name__ == "__main__":
