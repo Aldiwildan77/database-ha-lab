@@ -30,8 +30,12 @@ pg_patroni_dir: /etc/halab/patroni
 pg_patroni_config: "{{ pg_patroni_dir }}/patroni.yml"
 pg_patroni_pgpass: /var/lib/postgresql/.pgpass-patroni
 pg_patroni_ctl: /usr/local/sbin/halab-patronictl
+# REST API user (patroni.yml restapi.authentication); its password is db_admin_password.
+pg_patroni_rest_user: patroni
 # Present once Patroni runs this node's halab cluster (written by the patroni role, removed by destroy).
 pg_patroni_marker: /etc/postgresql/.ha-lab-patroni
+# Present while a handover to Patroni has started but not finished (the unit may be masked).
+pg_patroni_handover_marker: /etc/postgresql/.ha-lab-patroni-handover
 # Present when the lab installed the patroni package (destroy DATA=1 purges it only then).
 pg_patroni_package_marker: /etc/postgresql/.ha-lab-patroni-package
 pg_patroni_rest_port: "{{ lab_ports.patroni_rest | default(18008) }}"

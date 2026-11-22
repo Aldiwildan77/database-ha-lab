@@ -21,7 +21,7 @@ patroni_dcs:
       wal_keep_size: "{{ patroni_db_config.wal_keep_size | default('1GB') }}"
 patroni_db_config: "{{ db_config }}"
 
-patroni_rest_user: patroni
+patroni_rest_user: "{{ pg_patroni_rest_user }}"
 patroni_packages: [patroni, python3-etcd]
 patroni_wait_retries: 60
 patroni_wait_delay: 3

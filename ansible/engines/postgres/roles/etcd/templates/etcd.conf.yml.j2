@@ -1,13 +1,19 @@
-# Managed by database-ha-lab. Read only when the data directory is empty: initial-cluster* bootstrap a new cluster.
+# Managed by database-ha-lab. Read only when the data directory is empty: initial-cluster* bootstrap a new cluster,
+# or, with initial-cluster-state: existing, join a running one that added this member (etcdctl member add).
 name: {{ inventory_hostname }}
 data-dir: {{ pg_etcd_data_dir }}
 listen-peer-urls: https://0.0.0.0:{{ pg_etcd_peer_port }}
 listen-client-urls: https://0.0.0.0:{{ pg_etcd_client_port }}
 initial-advertise-peer-urls: https://{{ node_fqdn }}:{{ pg_etcd_peer_port }}
 advertise-client-urls: https://{{ node_fqdn }}:{{ pg_etcd_client_port }}
+{% if etcd_joining | default(false) %}
+initial-cluster: {{ etcd_initial_cluster }}
+initial-cluster-state: existing
+{% else %}
 initial-cluster: {% for n in groups['db_nodes'] | sort %}{{ n }}=https://{{ hostvars[n].node_fqdn }}:{{ pg_etcd_peer_port }}{{ ',' if not loop.last }}{% endfor %}
 
 initial-cluster-state: new
+{% endif %}
 initial-cluster-token: {{ etcd_cluster_token }}
 client-transport-security:
   cert-file: {{ pg_etcd_pki_dir }}/node.crt

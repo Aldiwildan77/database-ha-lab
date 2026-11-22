@@ -81,43 +81,27 @@
     name: halab-etcd
     state: absent
 
+- name: Check whether a handover to Patroni started
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_handover_marker }}"
+  register: td_handover
+
+- name: Read the cluster unit's state
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, "postgresql@{{ pg_version }}-{{ pg_cluster }}.service"]
+  register: td_unit
+  changed_when: false
+  failed_when: false
+
+- name: Read the cluster's start.conf
+  ansible.builtin.slurp:
+    src: "{{ pg_conf_dir }}/start.conf"
+  register: td_start_conf
+  failed_when: false
+
+# Also when the markers are missing but the unit is still masked or start.conf manual (an interrupted handover).
 - name: Give the cluster back to its systemd unit
-  when: td_marker.stat.exists
-  block:
-    - name: Unmask the cluster unit
-      ansible.builtin.systemd_service:
-        name: "postgresql@{{ pg_version }}-{{ pg_cluster }}.service"
-        masked: false
-        daemon_reload: true
-
-    - name: Start the cluster with the host
-      ansible.builtin.copy:
-        dest: "{{ pg_conf_dir }}/start.conf"
-        content: "auto\n"
-        owner: postgres
-        group: postgres
-        mode: "0644"
-
-    # PostgreSQL started by pg_ctlcluster reads the configuration in /etc; these are Patroni's copies in the data dir.
-    - name: Remove Patroni's files in the data directory
-      ansible.builtin.file:
-        path: "{{ pg_data_dir }}/{{ item }}"
-        state: absent
-      loop: [postgresql.conf, postgresql.conf.backup, patroni.dynamic.json]
-
-    - name: Start the cluster
-      ansible.builtin.command:
-        argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", start]
-      register: td_start
-      changed_when: td_start.rc == 0
-      failed_when: td_start.rc not in [0, 2]
-
-    - name: Wait for the PostgreSQL socket
-      ansible.builtin.wait_for:
-        path: "{{ pg_socket_dir }}/.s.PGSQL.{{ pg_port }}"
-        timeout: 120
-
-    - name: Remove the Patroni marker
-      ansible.builtin.file:
-        path: "{{ pg_patroni_marker }}"
-        state: absent
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-giveback.yml"
+  when: >-
+    td_marker.stat.exists or td_handover.stat.exists or td_unit.stdout | default('') | trim == 'masked'
+    or (td_start_conf.content | default('') | b64decode | trim) == 'manual'

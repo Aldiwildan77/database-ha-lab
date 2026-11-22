@@ -84,6 +84,17 @@
     path: "{{ pg_patroni_marker }}"
   register: patroni_marker
 
+- name: Check for an unfinished handover
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_handover_marker }}"
+  register: patroni_handover_marker
+
+- name: Give the cluster back after an interrupted handover
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-giveback.yml"
+  when:
+    - patroni_handover_marker.stat.exists
+    - not patroni_marker.stat.exists
+
 - name: Decide whether Patroni already took over
   ansible.builtin.set_fact:
     patroni_managed_nodes: >-
