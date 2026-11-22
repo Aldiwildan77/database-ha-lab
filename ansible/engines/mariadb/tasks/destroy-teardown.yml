@@ -1,5 +1,5 @@
 ---
-# MariaDB hook for destroy-ha.yml. Removes the replication layer and leaves standalone, writable nodes.
+# MariaDB hook for destroy-ha.yml. Removes the replication or Galera layer and leaves standalone, writable nodes.
 - name: Remove replication and switch semi-sync off
   ansible.mysql.mysql_query:
     login_unix_socket: /run/mysqld/mysqld.sock
@@ -15,3 +15,31 @@
   ansible.builtin.file:
     path: /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
     state: absent
+
+# Every Galera node holds a full copy, so each one keeps its data and restarts as a standalone server.
+- name: Dissolve the Galera cluster
+  when: destroy_provider == 'galera'
+  block:
+    - name: Stop MariaDB
+      ansible.builtin.service:
+        name: mariadb
+        state: stopped
+
+    - name: Remove Galera configuration and state
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/mysql/mariadb.conf.d/zz-ha-lab-galera.cnf
+        - /etc/mysql/halab-galera-tls
+        - /var/lib/mysql/grastate.dat
+        - /var/lib/mysql/gvwstate.dat
+        - /var/lib/mysql/galera.cache
+        - /var/lib/mysql/mariadb_backup_galera_info
+        - /var/lib/mysql/mariadb_backup_galera_info_SST
+
+    - name: Start MariaDB standalone
+      ansible.builtin.service:
+        name: mariadb
+        state: started
+      when: not (destroy_data | default(false) | bool)

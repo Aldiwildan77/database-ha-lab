@@ -8,7 +8,7 @@
       - >-
         SELECT @@GLOBAL.read_only AS read_only, @@GLOBAL.gtid_current_pos AS gtid_current_pos,
                @@GLOBAL.gtid_binlog_pos AS gtid_binlog_pos, @@GLOBAL.gtid_slave_pos AS gtid_slave_pos,
-               @@GLOBAL.server_id AS server_id
+               @@GLOBAL.server_id AS server_id, @@GLOBAL.wsrep_on AS wsrep_on
       - SHOW SLAVE STATUS
       - >-
         SELECT VARIABLE_NAME AS name, VARIABLE_VALUE AS value FROM information_schema.GLOBAL_STATUS
@@ -27,9 +27,16 @@
       node: "{{ inventory_hostname }}"
       db_up: "{{ topo_raw.query_result is defined }}"
       error: "{{ topo_raw.msg | default('') if topo_raw.query_result is not defined else '' }}"
-      read_only: "{{ (topo_raw.query_result[0][0].read_only | int == 1) if topo_raw.query_result is defined else none }}"
+      # A Galera node outside the primary component (wsrep_ready OFF) refuses writes although read_only is off.
+      read_only: >-
+        {{ (topo_raw.query_result[0][0].read_only | int == 1
+            or (topo_raw.query_result[0][0].wsrep_on | int == 1 and wsrep_status.wsrep_ready | default('OFF') != 'ON'))
+           if topo_raw.query_result is defined else none }}
       gtid_current_pos: "{{ topo_raw.query_result[0][0].gtid_current_pos if topo_raw.query_result is defined else '' }}"
-      position: "{{ topo_raw.query_result[0][0].gtid_current_pos if topo_raw.query_result is defined else '' }}"
+      # Galera GTIDs carry the origin's server_id, so gtid_current_pos stays empty on the other nodes.
+      position: >-
+        {{ (topo_raw.query_result[0][0].gtid_binlog_pos if topo_raw.query_result[0][0].wsrep_on | int == 1
+            else topo_raw.query_result[0][0].gtid_current_pos) if topo_raw.query_result is defined else '' }}
       replica: >-
         {{ {'source_host': r.Master_Host, 'source_port': r.Master_Port,
             'io_state': 'ON' if r.Slave_IO_Running == 'Yes' else r.Slave_IO_Running | upper,
@@ -39,8 +46,9 @@
             'seconds_behind': r.Seconds_Behind_Master}
            if (topo_raw.query_result is defined and topo_raw.query_result[1] | length) else {} }}
       group: []
-      status: >-
-        {{ dict(topo_raw.query_result[2] | map(attribute='name') | map('lower')
-                | zip(topo_raw.query_result[2] | map(attribute='value'))) if topo_raw.query_result is defined else {} }}
+      status: "{{ wsrep_status }}"
   vars:
+    wsrep_status: >-
+      {{ dict(topo_raw.query_result[2] | map(attribute='name') | map('lower')
+              | zip(topo_raw.query_result[2] | map(attribute='value'))) if topo_raw.query_result is defined else {} }}
     r: "{{ topo_raw.query_result[1][0] if (topo_raw.query_result is defined and topo_raw.query_result[1] | length) else {} }}"

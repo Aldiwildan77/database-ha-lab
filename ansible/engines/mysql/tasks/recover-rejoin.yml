@@ -10,6 +10,14 @@
     - inventory_hostname == node
     - rc_primary != ''
 
+- name: Start MySQL (rejoins Percona XtraDB Cluster through IST or SST)
+  ansible.builtin.service:
+    name: mysql
+    state: started
+  when:
+    - lab_ha_strategy.family == 'galera'
+    - inventory_hostname == node
+
 - name: Rejoin InnoDB Cluster
   ansible.builtin.command:
     argv:

@@ -90,8 +90,9 @@ class Collector:
             return []
 
     def _collect(self, c, reg):
-        v = self._q(c, "SELECT @@GLOBAL.read_only ro, @@GLOBAL.gtid_current_pos g, @@GLOBAL.gtid_slave_pos sp, "
-                       "@@GLOBAL.wsrep_on wsrep")[0]
+        # Galera GTIDs carry the origin's server_id, so gtid_current_pos stays empty on the other nodes.
+        v = self._q(c, "SELECT @@GLOBAL.read_only ro, @@GLOBAL.gtid_slave_pos sp, @@GLOBAL.wsrep_on wsrep, "
+                       "IF(@@GLOBAL.wsrep_on, @@GLOBAL.gtid_binlog_pos, @@GLOBAL.gtid_current_pos) g")[0]
         status = {r["VARIABLE_NAME"].lower(): r["VARIABLE_VALUE"] for r in self._q(
             c, "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS WHERE VARIABLE_NAME IN "
                "('wsrep_ready','wsrep_cluster_size','wsrep_cluster_status','wsrep_local_recv_queue',"
@@ -102,7 +103,8 @@ class Collector:
         ro = int(v["ro"])
         reg.gauge("ha_lab_read_only", ro)
         reg.gauge("ha_lab_replication_position", gtid_count(v["g"]),
-                  help_="Replication position: sum of the highest seq_no per domain in gtid_current_pos (MariaDB). "
+                  help_="Replication position: sum of the highest seq_no per domain in gtid_current_pos (MariaDB; "
+                        "gtid_binlog_pos under Galera). "
                         "Equal values across nodes indicate convergence.")
         writable = ro == 0
         if int(v["wsrep"]) == 1:

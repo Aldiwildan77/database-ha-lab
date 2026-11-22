@@ -1,0 +1,187 @@
+---
+# Turns the provisioned standalone MariaDB nodes into a Galera cluster. The role-primary node bootstraps it
+# when no node holds a primary component; the others join one at a time and receive an SST copy of it.
+- name: Check Galera settings
+  ansible.builtin.assert:
+    that:
+      - galera_sst_method in ['mariabackup', 'rsync']
+      - galera_encrypt | bool or lab_unencrypted_networks | length == 0
+      - galera_sst_method == 'mariabackup' or not (galera_encrypt | bool)
+    fail_msg: >-
+      mariadb_galera: sst_method must be mariabackup or rsync; encrypt_cluster_traffic cannot be false on
+      unencrypted networks {{ lab_unencrypted_networks }}; encrypted SST needs sst_method mariabackup.
+    quiet: true
+  run_once: true
+
+- name: Install Galera and the SST tools
+  ansible.builtin.apt:
+    name: "{{ galera_packages }}"
+    state: present
+
+- name: Read service state
+  ansible.builtin.service_facts:
+
+- name: Read wsrep state
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ galera_socket }}"
+    query:
+      - SELECT @@GLOBAL.wsrep_on AS wsrep_on
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status', 'wsrep_local_state_comment',
+          'wsrep_cluster_size', 'wsrep_cluster_state_uuid')
+  register: galera_state
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.services['mariadb.service'].state | default('') == 'running'
+
+- name: Read saved Galera state
+  ansible.builtin.slurp:
+    src: "{{ galera_datadir }}/grastate.dat"
+  register: galera_grastate
+  failed_when: false
+
+# Tables outside the system schemas, whether the server runs or not. An SST replaces them on a joiner.
+- name: Find tables a joiner would lose
+  ansible.builtin.command:
+    argv: [find, "{{ galera_datadir }}", -mindepth, "2", -maxdepth, "2", -name, "*.frm",
+           -not, -path, "{{ galera_datadir }}/mysql/*", -not, -path, "{{ galera_datadir }}/sys/*",
+           -not, -path, "{{ galera_datadir }}/performance_schema/*"]
+  register: galera_tables
+  changed_when: false
+
+- name: Record node state
+  ansible.builtin.set_fact:
+    galera_wsrep: "{{ (galera_state.query_result[1] | items2dict(key_name='Variable_name', value_name='Value')) if galera_state.query_result is defined else {} }}"
+    galera_wsrep_on: "{{ galera_state.query_result is defined and galera_state.query_result[0][0].wsrep_on | int == 1 }}"
+    galera_saved_uuid: >-
+      {{ ((galera_grastate.content | b64decode) | regex_findall('uuid:\s*([0-9a-f-]+)') | first | default(''))
+         if galera_grastate.content is defined else '' }}
+
+- name: Find the running cluster
+  ansible.builtin.set_fact:
+    galera_members: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars)
+         | selectattr('galera_wsrep_on') | selectattr('galera_wsrep.wsrep_cluster_status', 'defined')
+         | selectattr('galera_wsrep.wsrep_cluster_status', 'equalto', 'Primary') | map(attribute='inventory_hostname') | list }}
+    galera_stateful: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'galera_saved_uuid')
+         | reject('match', '^(00000000-0000-0000-0000-000000000000)?$') | list | length > 0 }}
+  run_once: true
+
+- name: Find the cluster this node would join
+  ansible.builtin.set_fact:
+    galera_cluster_uuid: "{{ hostvars[galera_members[0]].galera_wsrep.wsrep_cluster_state_uuid if galera_members else '' }}"
+  run_once: true
+
+- name: Refuse to bootstrap over a cluster that ran before
+  ansible.builtin.fail:
+    msg: >-
+      No node holds a primary component, but saved Galera state exists ({{ galera_datadir }}/grastate.dat).
+      The cluster ran before and is down now. Run make recover NODE=<any node>: it starts the cluster from the
+      node with the highest committed seqno.
+  when: not galera_members and galera_stateful
+  run_once: true
+
+- name: Protect tables a joiner would lose
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} has {{ galera_tables.stdout_lines | length }} table(s) outside the system schemas
+      (e.g. {{ galera_tables.stdout_lines[:3] | join(', ') }}). Joining the Galera cluster replaces them with an
+      SST copy of {{ galera_members[0] if galera_members else galera_bootstrap_node }}.
+      Re-run with -e mariadb_galera_rebuild_joiner=true to accept that, or move the data first.
+  when:
+    - galera_tables.stdout_lines | length > 0
+    - not (mariadb_galera_rebuild_joiner | bool)
+    - (inventory_hostname != galera_bootstrap_node) if not galera_members else (inventory_hostname not in galera_members)
+    - not galera_members or galera_saved_uuid != galera_cluster_uuid
+
+- name: Share TLS material for cluster traffic
+  when: galera_encrypt | bool
+  block:
+    - name: Create TLS directory
+      ansible.builtin.file:
+        path: "{{ galera_tls_dir }}"
+        state: directory
+        owner: root
+        group: mysql
+        mode: "0750"
+
+    # One self-signed certificate is the CA and the identity of every node: a peer is trusted when it holds it.
+    - name: Generate the cluster certificate
+      ansible.builtin.command:
+        argv: [openssl, req, -x509, -newkey, "rsa:2048", -nodes, -days, "3650", -subj, "/CN={{ galera_cluster_name }}",
+               -keyout, "{{ galera_tls_dir }}/key.pem", -out, "{{ galera_tls_dir }}/cert.pem"]
+        creates: "{{ galera_tls_dir }}/cert.pem"
+      delegate_to: "{{ galera_bootstrap_node }}"
+      run_once: true
+
+    - name: Read the cluster certificate
+      ansible.builtin.slurp:
+        src: "{{ galera_tls_dir }}/{{ item }}"
+      loop: [cert.pem, key.pem]
+      register: galera_certs
+      delegate_to: "{{ galera_bootstrap_node }}"
+      run_once: true
+      no_log: true
+
+    - name: Install the cluster certificate
+      ansible.builtin.copy:
+        dest: "{{ galera_tls_dir }}/{{ item.item }}"
+        content: "{{ item.content | b64decode }}"
+        owner: root
+        group: mysql
+        mode: "{{ '0640' if item.item == 'key.pem' else '0644' }}"
+      loop: "{{ galera_certs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+      register: galera_cert_files
+
+- name: Write Galera configuration
+  ansible.builtin.template:
+    src: galera.cnf.j2
+    dest: "{{ galera_config_file }}"
+    mode: "0644"
+  register: galera_cnf
+
+- name: Bootstrap a new cluster
+  when: not galera_members
+  block:
+    - name: Stop the standalone servers
+      ansible.builtin.service:
+        name: mariadb
+        state: stopped
+
+    - name: Start the bootstrap node as a new cluster
+      ansible.builtin.command: galera_new_cluster
+      changed_when: true
+      when: inventory_hostname == galera_bootstrap_node
+
+    - name: Join the other nodes one at a time
+      ansible.builtin.include_tasks: restart-node.yml
+      loop: "{{ ansible_play_hosts_all | difference([galera_bootstrap_node]) }}"
+      loop_control:
+        loop_var: galera_target
+      run_once: true
+
+# Nodes outside the primary component join it; members whose configuration changed restart one at a time.
+- name: Join or restart nodes of the running cluster
+  ansible.builtin.include_tasks: restart-node.yml
+  loop: >-
+    {{ (ansible_play_hosts_all | reject('in', galera_members) | list
+        + (galera_members | map('extract', hostvars) | selectattr('galera_cnf.changed')
+           | map(attribute='inventory_hostname') | list)
+        + (galera_members | map('extract', hostvars) | selectattr('galera_cert_files.changed', 'defined')
+           | selectattr('galera_cert_files.changed') | map(attribute='inventory_hostname') | list)) | unique }}
+  loop_control:
+    loop_var: galera_target
+  run_once: true
+  when: galera_members | length > 0
+
+- name: Wait until every node is Synced
+  ansible.builtin.include_tasks: wait-synced.yml
+
+- name: Start MariaDB at boot
+  ansible.builtin.service:
+    name: mariadb
+    enabled: true

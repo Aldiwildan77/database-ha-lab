@@ -25,7 +25,7 @@ ha_provider: streaming-replication # one of the engine's strategies below
 |---|---|---|---|
 | [async-replication](mariadb/async-replication/README.md) | manual (`make promote`) | the primary has written it locally | possible: anything not yet received by a replica |
 | [semi-sync](mariadb/semi-sync/README.md) | manual | one replica received it, or the timeout expired | possible after a timeout fallback |
-| `galera` | planned | | |
+| [galera](mariadb/galera/README.md) | none needed (multi-primary) | every node certified it | not while a primary component exists; a lost quorum blocks writes |
 | `maxscale` | planned | | |
 
 ## PostgreSQL

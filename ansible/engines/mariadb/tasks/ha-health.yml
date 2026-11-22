@@ -28,3 +28,28 @@
          else 'WARNING: semi-sync is OFF on the primary (no semi-sync replica connected, or the timeout fell back to async)' }}
   run_once: true
   when: lab_ha_strategy.semi_sync | default(false) and lab_writable | length == 1
+
+- name: Check Galera cluster state
+  ansible.builtin.assert:
+    that:
+      - lab_down | length == 0
+      - lab_galera_primary | length == ansible_play_hosts_all | length
+      - lab_galera_synced | length == ansible_play_hosts_all | length
+      - lab_topo_all | selectattr('db_up') | map(attribute='status.wsrep_cluster_size') | map('int') | unique | list == [ansible_play_hosts_all | length]
+    fail_msg: >-
+      {{ ('Degraded MariaDB Galera cluster: quorum held, ' ~ lab_galera_primary | length ~ ' of ' ~ ansible_play_hosts_all | length
+          ~ ' nodes are in the primary component and accept writes.')
+         if lab_galera_primary | length > (ansible_play_hosts_all | length) / 2
+         else 'MariaDB Galera cluster without quorum: no node accepts writes (make recover NODE=<node>).' }}
+      down={{ lab_down }} primary={{ lab_galera_primary }} synced={{ lab_galera_synced }}
+      status={{ dict(lab_topo_all | map(attribute='node') | zip(lab_topo_all | map(attribute='status'))) }}
+    quiet: true
+  vars:
+    lab_galera_primary: >-
+      {{ lab_topo_all | selectattr('db_up') | selectattr('status.wsrep_cluster_status', 'defined')
+         | selectattr('status.wsrep_cluster_status', 'equalto', 'Primary') | map(attribute='node') | list }}
+    lab_galera_synced: >-
+      {{ lab_topo_all | selectattr('db_up') | selectattr('status.wsrep_local_state_comment', 'defined')
+         | selectattr('status.wsrep_local_state_comment', 'equalto', 'Synced') | map(attribute='node') | list }}
+  run_once: true
+  when: lab_ha_strategy.family == 'galera'

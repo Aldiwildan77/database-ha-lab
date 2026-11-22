@@ -30,7 +30,8 @@ Status: ✅ ready · ❌ planned (refused by `make validate-config`). Counts and
 | MariaDB | Failover, manual promote | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | semi-sync waits for exactly 1 replica |
 | MariaDB | Recover old primary | `async-replication`, `semi-sync` | 2 ✅ | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | Errant GTID domains stop it |
 | MariaDB | Network disruption | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | |
-| MariaDB | Failover, multi-primary | `galera` | 3 ❌ (odd) | 2 / 4 GB / 30 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | planned |
+| MariaDB | Failover, multi-primary | `galera` | 3 ✅ (odd) | 2 / 4 GB / 30 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | No promotion; quorum loss blocks writes; `make recover` bootstraps from the highest seqno |
+| MariaDB | Quorum loss / full outage | `galera` | 3 ✅; 5 to survive 2 failures | 2 / 4 GB / 30 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | |
 | MariaDB | Failover, automatic via proxy | `maxscale` | 3 ❌ | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | planned |
 | PostgreSQL | Load benchmark, direct | none | 1 ✅ | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | |
 | PostgreSQL | Switchover | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | No data loss expected |

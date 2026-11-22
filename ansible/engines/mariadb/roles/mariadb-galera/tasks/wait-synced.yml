@@ -1,0 +1,16 @@
+---
+- name: Wait until the node is Synced in a full primary component
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ galera_socket }}"
+    query: SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_local_state_comment', 'wsrep_cluster_status', 'wsrep_cluster_size')
+  register: galera_sync
+  changed_when: false
+  failed_when: false
+  vars:
+    galera_sync_status: "{{ galera_sync.query_result[0] | default([]) | items2dict(key_name='Variable_name', value_name='Value') }}"
+  until: >-
+    galera_sync_status.wsrep_local_state_comment | default('') == 'Synced'
+    and galera_sync_status.wsrep_cluster_status | default('') == 'Primary'
+    and galera_sync_status.wsrep_cluster_size | default(0) | int == groups['db_nodes'] | length
+  retries: "{{ galera_sync_retries }}"
+  delay: "{{ galera_sync_delay }}"

@@ -29,7 +29,8 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 | | `percona-xtradb-cluster` | Galera | 3 | containers: deploy and health only |
 | MariaDB 11.4 (10.11, 11.8) | `async-replication` | manual | 2 | containers, end to end |
 | | `semi-sync` | manual | 2 | containers, end to end |
-| | `galera`, `maxscale` | | | planned, refused at validate time |
+| | `galera` | Galera (multi-primary) | 3 | systemd containers: deploy, redeploy, health, recover (one node, quorum loss, full outage), destroy |
+| | `maxscale` | | | planned, refused at validate time |
 | PostgreSQL 17 (16, 18) | `streaming-replication` | manual, LSN-based, `pg_rewind` recovery | 2 | containers, end to end |
 | | `sync-replication` | manual | 2 | containers, end to end |
 | | `patroni` | | | planned, refused at validate time |
