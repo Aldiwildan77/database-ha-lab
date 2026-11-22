@@ -1,0 +1,21 @@
+[Unit]
+Description=Patroni for the halab PostgreSQL cluster (database-ha-lab)
+Wants=network-online.target
+After=network-online.target {{ pg_etcd_unit }}.service
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+Environment=MALLOC_ARENA_MAX=1
+Environment=PG_MALLOC_ARENA_MAX=
+ExecStart=/usr/bin/patroni {{ pg_patroni_config }}
+ExecReload=/bin/kill -s HUP $MAINPID
+# Stop only Patroni; it shuts PostgreSQL down cleanly and releases the leader key.
+KillMode=process
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

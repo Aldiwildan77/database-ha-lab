@@ -1,6 +1,10 @@
 ---
 # PostgreSQL hook for destroy-ha.yml. Removes replication for destroy_provider: every node becomes a standalone,
 # writable cluster again (standbys are promoted). Data is kept.
+- name: Remove Patroni and etcd
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-teardown.yml"
+  when: destroy_provider == 'patroni'
+
 - name: Remove the synchronous replication settings
   ansible.builtin.file:
     path: "{{ pg_conf_dir }}/conf.d/zzz-ha-lab-sync.conf"
@@ -39,6 +43,23 @@
         autocommit: true
       changed_when: true
       when: (destroy_state.query_result | default([{}]))[0].in_recovery | default(false)
+
+# Patroni keeps a physical slot per member; unused, they would retain WAL forever. Node names are validated
+# ([a-z0-9-]), so they are safe to inline; the module would pass a list argument as text.
+- name: Drop Patroni's replication slots
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+      WHERE slot_type = 'physical' AND NOT active AND slot_name IN
+      ({{ groups['db_nodes'] | map('regex_replace', '[^a-z0-9_]', '_') | map('regex_replace', '^(.*)$', "'\1'") | join(', ') }})
+    login_unix_socket: "{{ pg_socket_dir }}"
+    login_port: "{{ pg_port }}"
+    login_user: postgres
+  register: destroy_slots
+  changed_when: destroy_slots.rowcount | default(0) > 0
+  when: destroy_provider == 'patroni'
 
 - name: Remove the replication password file
   ansible.builtin.file:

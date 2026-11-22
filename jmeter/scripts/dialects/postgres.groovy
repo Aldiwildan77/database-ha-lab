@@ -10,8 +10,8 @@ class LabDialect {
 
     String adminDatabase() { return 'postgres' }
 
-    // cluster_name is set to the node's address by the postgres role, so served_by matches the inventory.
-    String roQuery() { return "SELECT CASE WHEN pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on' THEN 1 ELSE 0 END, current_setting('cluster_name')" }
+    // halab.node (and cluster_name outside Patroni) is set to the node's address by the postgres role, so served_by matches the inventory.
+    String roQuery() { return "SELECT CASE WHEN pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on' THEN 1 ELSE 0 END, COALESCE(current_setting('halab.node', true), current_setting('cluster_name'))" }
 
     String now() { return 'clock_timestamp()' }
 

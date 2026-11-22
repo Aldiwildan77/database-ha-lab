@@ -1,0 +1,47 @@
+---
+# Stops the pg_ctlcluster-managed cluster and lets Patroni run it. The cluster's own unit is masked and its start.conf
+# set to manual, so systemd never starts a second postmaster on the same data; destroy reverses both.
+- name: Stop the cluster
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", stop, -m, fast]
+  register: patroni_stop
+  changed_when: patroni_stop.rc == 0
+  failed_when: patroni_stop.rc not in [0, 2]
+
+- name: Stop systemd from starting the cluster
+  ansible.builtin.copy:
+    dest: "{{ pg_conf_dir }}/start.conf"
+    content: "manual\n"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+
+- name: Mask the cluster unit
+  ansible.builtin.systemd_service:
+    name: "postgresql@{{ pg_version }}-{{ pg_cluster }}.service"
+    masked: true
+
+- name: Start Patroni
+  ansible.builtin.systemd_service:
+    name: "{{ pg_patroni_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait until Patroni runs PostgreSQL
+  ansible.builtin.uri:
+    url: "https://{{ node_fqdn }}:{{ pg_patroni_rest_port }}/patroni"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_self
+  until:
+    - patroni_self.json is defined
+    - patroni_self.json.state | default('') == 'running'
+  retries: "{{ patroni_wait_retries }}"
+  delay: "{{ patroni_wait_delay }}"
+
+- name: Record that Patroni runs this node
+  ansible.builtin.copy:
+    dest: "{{ pg_patroni_marker }}"
+    mode: "0644"
+    content: "halab cluster run by {{ pg_patroni_unit }}.service; destroy restores postgresql@{{ pg_version }}-{{ pg_cluster }}.service\n"

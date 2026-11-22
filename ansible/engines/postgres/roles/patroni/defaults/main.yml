@@ -1,0 +1,33 @@
+---
+# Dynamic (DCS) settings; the role applies changes through the REST API on every deploy.
+patroni_dcs:
+  ttl: "{{ pg_patroni.ttl | default(30) | int }}"
+  loop_wait: "{{ pg_patroni.loop_wait | default(10) | int }}"
+  retry_timeout: "{{ pg_patroni.retry_timeout | default(10) | int }}"
+  maximum_lag_on_failover: "{{ pg_patroni.maximum_lag_on_failover | default(1048576) | int }}"
+  synchronous_mode: "{{ pg_patroni.synchronous_mode | default(false) | bool }}"
+  synchronous_node_count: "{{ pg_patroni.synchronous_node_count | default(1) | int }}"
+  postgresql:
+    use_pg_rewind: "{{ pg_patroni.use_pg_rewind | default(true) | bool }}"
+    use_slots: true
+    # Patroni passes these on the command line, so they must be cluster-wide (DCS), not in postgresql.conf.
+    parameters:
+      max_connections: "{{ patroni_db_config.max_connections | default(500) }}"
+      max_wal_senders: "{{ patroni_db_config.max_wal_senders | default(20) }}"
+      max_replication_slots: "{{ patroni_db_config.max_replication_slots | default(20) }}"
+      wal_level: replica
+      hot_standby: "on"
+      wal_log_hints: "on"
+      wal_keep_size: "{{ patroni_db_config.wal_keep_size | default('1GB') }}"
+patroni_db_config: "{{ db_config }}"
+
+patroni_rest_user: patroni
+patroni_packages: [patroni, python3-etcd]
+patroni_wait_retries: 60
+patroni_wait_delay: 3
+patroni_ssl_mode: require
+# Primary for the initial build (the replication role clones it); later deploys follow the Patroni leader.
+patroni_initial_primary: "{{ groups['role_primary'][0] }}"
+patroni_ca: "{{ pg_etcd_pki_dir }}/ca.crt"
+patroni_cert: "{{ pg_etcd_pki_dir }}/node.crt"
+patroni_key: "{{ pg_etcd_pki_dir }}/node.key"

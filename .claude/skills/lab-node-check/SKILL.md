@@ -36,7 +36,10 @@ Two questions: **can this machine be a node**, and **are there enough nodes for 
 | PostgreSQL | Failover, manual promote | `sync-replication` | 3 ✅ (2 works, but losing the standby blocks commits) | x86_64, aarch64 | Survives `nodes - 1 - num_sync` standby losses |
 | PostgreSQL | Recover old primary (pg_rewind) | `streaming-replication`, `sync-replication` | 2 ✅ | x86_64, aarch64 | Needs `db_admin_password`; else `postgres_rebuild=true` |
 | PostgreSQL | Network disruption | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | x86_64, aarch64 | |
-| PostgreSQL | Failover, automatic | `patroni` | 3 ❌ (+ etcd) | – | planned |
+| PostgreSQL | Failover, automatic | `patroni` | 3 ✅ (odd; 5 survives 2 failures) | x86_64, aarch64 | etcd runs on the same nodes; leader key TTL 30 s bounds a hung leader |
+| PostgreSQL | Switchover | `patroni` | 3 ✅ | x86_64, aarch64 | Patroni REST `/switchover`; with `synchronous_mode` only to the sync standby |
+| PostgreSQL | Recover old leader | `patroni` | 3 ✅ | x86_64, aarch64 | Patroni rewinds it itself; `postgres_rebuild=true` runs `patronictl reinit` |
+| PostgreSQL | Quorum loss (etcd) | `patroni` | 3 ✅ | x86_64, aarch64 | Losing 2 of 3 etcd members demotes the leader: read-only, no loss |
 
 All nodes in a lab run one engine and one strategy. Switching needs `make destroy` (`DATA=1` when the server packages change).
 
@@ -63,6 +66,7 @@ Lab ports (defaults differ from product standards; all configurable):
 |---|---|
 | MySQL / MariaDB replication | 13306 |
 | PostgreSQL replication | 15432 |
+| `patroni` | 15432, 18008 (Patroni REST), 12379, 12380 (etcd client, peer) |
 | `orchestrator` | 13306, 13000, 13008 |
 | `innodb-cluster` | 13306 (+ Router 16446/16447 for clients) |
 | `percona-xtradb-cluster` | 13306, 14567, 14568, 14444 |

@@ -31,8 +31,10 @@ ports:
   etcd_peer: {default: 12380, standard: 2380, config: patroni.etcd_peer_port}
 packages:
   default: [postgresql-common, "postgresql-<version>", "postgresql-client-<version>", python3-psycopg2, ssl-cert, acl]
+  patroni: [postgresql-common, "postgresql-<version>", "postgresql-client-<version>", python3-psycopg2, ssl-cert, acl, patroni, python3-etcd]
 apt_repository:
   default: apt.postgresql.org (PGDG, pinned to postgresql-* packages only)
+  patroni: apt.postgresql.org (PGDG, pinned to postgresql-* and patroni); etcd from the official release tarball
 conflicting_packages:
   default: []
 paths_written:
@@ -45,6 +47,11 @@ paths_written:
   - /opt/node_exporter-*
   - /opt/postgres_exporter-*
   - /var/lib/node_exporter/textfile
+  - /etc/apt/preferences.d/halab-patroni   # patroni only
+  - /opt/halab-etcd-*                       # patroni only
+  - /var/lib/halab-etcd                     # patroni only
+  - /etc/systemd/system/halab-patroni.service
+  - /etc/systemd/system/halab-etcd.service
 
 # Replication uses LSNs, not GTIDs, so topology, promotion and RPO measurement need their own code.
 ha:
@@ -67,10 +74,12 @@ ha:
     client_ports: [postgres]
     provision: [{role: postgres}]
     deploy: [{role: postgres-replication}]
+  # Patroni runs PostgreSQL itself (halab-patroni.service); the pg_ctlcluster unit of the halab cluster is masked.
   patroni:
-    status: planned
     family: replication
     failover: patroni
+    service_unit: halab-patroni.service
+    auto_failover_wait: 45
     min_nodes: 3
     max_nodes: null
     even_nodes_warning: true

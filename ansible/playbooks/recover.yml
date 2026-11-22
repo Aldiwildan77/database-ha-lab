@@ -8,7 +8,7 @@
   tasks:
     - name: Start the database service
       ansible.builtin.service:
-        name: "{{ lab_engine.service }}"
+        name: "{{ lab_db_service_unit }}"
         state: started
 
 - name: Rejoin

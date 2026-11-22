@@ -1,0 +1,83 @@
+---
+- name: Create the etcd system user
+  ansible.builtin.user:
+    name: "{{ etcd_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ pg_etcd_data_dir }}"
+    create_home: false
+
+- name: Create etcd directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ etcd_install_dir }}", owner: root, group: root, mode: "0755"}
+    - {path: "{{ pg_etcd_conf_dir }}", owner: root, group: "{{ etcd_user }}", mode: "0750"}
+    - {path: "{{ pg_etcd_pki_dir }}", owner: root, group: "{{ etcd_user }}", mode: "0750"}
+    - {path: "{{ pg_etcd_data_dir }}", owner: "{{ etcd_user }}", group: "{{ etcd_user }}", mode: "0700"}
+
+- name: Download etcd (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ etcd_url }}/{{ etcd_release }}.tar.gz"
+    dest: "/tmp/{{ etcd_release }}.tar.gz"
+    checksum: "{{ etcd_checksum }}"
+    mode: "0644"
+
+- name: Unpack etcd
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ etcd_release }}.tar.gz"
+    dest: "{{ etcd_install_dir }}"
+    remote_src: true
+    extra_opts: [--strip-components=1]
+    creates: "{{ etcd_install_dir }}/etcd"
+
+- name: Issue TLS certificates
+  ansible.builtin.include_tasks: pki.yml
+
+- name: Write etcd configuration
+  ansible.builtin.template:
+    src: etcd.conf.yml.j2
+    dest: "{{ pg_etcd_conf_dir }}/etcd.conf.yml"
+    owner: root
+    group: "{{ etcd_user }}"
+    mode: "0640"
+  notify: Restart etcd
+
+- name: Install the etcd unit
+  ansible.builtin.template:
+    src: halab-etcd.service.j2
+    dest: "/etc/systemd/system/{{ pg_etcd_unit }}.service"
+    mode: "0644"
+  notify: Restart etcd
+
+- name: Install the etcdctl wrapper
+  ansible.builtin.template:
+    src: halab-etcdctl.j2
+    dest: "{{ pg_etcd_ctl }}"
+    mode: "0750"
+
+# Type=notify: each member returns only once the cluster has quorum, so all nodes start in parallel.
+- name: Start etcd
+  ansible.builtin.systemd_service:
+    name: "{{ pg_etcd_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  register: etcd_started
+
+- name: Apply pending restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait until every etcd member is healthy
+  ansible.builtin.command:
+    argv: ["{{ pg_etcd_ctl }}", endpoint, health, --cluster]
+  register: etcd_health
+  until: etcd_health.rc == 0
+  retries: "{{ etcd_wait_retries }}"
+  delay: "{{ etcd_wait_delay }}"
+  changed_when: false
+  run_once: true

@@ -2,7 +2,7 @@
 # Database engine. Each engine is a descriptor in ansible/engines/<name>/engine.yml.
 #   mysql    ready:   async-replication | semi-sync | orchestrator | innodb-cluster | percona-xtradb-cluster
 #   mariadb  ready:   async-replication | semi-sync   (galera and maxscale are planned and refused)
-#   postgres ready:   streaming-replication | sync-replication   (patroni is planned and refused)
+#   postgres ready:   streaming-replication | sync-replication | patroni
 # A planned engine or strategy is refused at validate time until its roles exist.
 db_engine: mysql
 
@@ -40,6 +40,23 @@ postgres:
 sync_replication:
   num_sync: 1
   commit_level: "on"        # on (standby flushed) | remote_write | remote_apply
+
+# patroni: Patroni runs the halab cluster on every node and fails over by itself; etcd (one member per node,
+# TLS with client certificates) is its DCS. Use an odd node count (3 survives one failure). ttl through
+# use_pg_rewind are dynamic: make ha applies changes to a running cluster; scope and ports are fixed at deploy.
+# Keep loop_wait + 2 * retry_timeout <= ttl.
+patroni:
+  scope: halab                     # Patroni cluster name (etcd prefix /halab/<scope>/)
+  ttl: 30                          # leader key lifetime in seconds: the longest a hung leader blocks failover
+  loop_wait: 10
+  retry_timeout: 10
+  maximum_lag_on_failover: 1048576 # bytes; a replica further behind is never promoted
+  synchronous_mode: false          # true: commits wait for a synchronous standby, failover never loses them
+  synchronous_node_count: 1
+  use_pg_rewind: true              # rewind a failed old leader instead of copying it again
+  rest_port: 18008                 # standard 8008; Patroni REST API (TLS)
+  etcd_client_port: 12379          # standard 2379
+  etcd_peer_port: 12380            # standard 2380
 
 monitoring:
   enabled: true

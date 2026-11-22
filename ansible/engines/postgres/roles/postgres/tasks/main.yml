@@ -27,6 +27,11 @@
     - not postgres_marker.stat.exists
     - not (postgres_adopt_existing | bool)
 
+- name: Check whether Patroni runs the cluster
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_marker }}"
+  register: postgres_patroni_marker
+
 - name: Add the PGDG APT repository
   ansible.builtin.deb822_repository:
     name: pgdg
@@ -160,6 +165,7 @@
   register: postgres_start
   changed_when: postgres_start.rc == 0
   failed_when: postgres_start.rc not in [0, 2]
+  when: not postgres_patroni_marker.stat.exists
 
 - name: Wait for the PostgreSQL socket
   ansible.builtin.wait_for:

@@ -1,6 +1,6 @@
 # Database engines and HA strategies
 
-The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `galera` and `maxscale` and PostgreSQL's `patroni` are planned. The runbook for each engine and strategy is in [ha/README.md](../../ha/README.md).
+The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication`, `sync-replication` and `patroni`. MariaDB's `galera` and `maxscale` are planned. The runbook for each engine and strategy is in [ha/README.md](../../ha/README.md).
 
 ## Layout
 
@@ -16,9 +16,9 @@ ansible/
       engine.yml           descriptor; galera and maxscale are status: planned
       roles/               mariadb, mariadb-replication (reuses mysql-exporter)
       tasks/               hooks
-    postgres/              ready (streaming-replication, sync-replication)
-      engine.yml           descriptor; patroni is status: planned
-      roles/               postgres, postgres-replication, postgres-exporter
+    postgres/              ready (streaming-replication, sync-replication, patroni)
+      engine.yml           descriptor
+      roles/               postgres, postgres-replication, postgres-exporter, etcd, patroni
       tasks/               hooks
   roles/                   core roles: common (firewall), node-exporter, lab-collector
   playbooks/, tasks/       core: engine-neutral, call the engine's roles and hooks
@@ -56,11 +56,11 @@ The inventory plugin loads every `ansible/engines/*/engine.yml` and checks each 
 | `packages`, `conflicting_packages`, `apt_repository` | Per strategy or `default`; used by `make plan-host` |
 | `ports`, `primary_port`, `exporter_port` | Lab defaults that differ from the product standard; `config` names the `ha.yml` override; `span` reserves consecutive ports |
 | `exporter` | Role that installs it, its name, and its "up" metric |
-| `service_unit` | systemd unit that runs the server (`{version}` is replaced with `db_version`); the firewall starts before it and the collector after it. Default `<service>.service` |
+| `service_unit` | systemd unit that runs the server (`{version}` is replaced with `db_version`); the firewall starts before it, the collector after it, and `fault.yml` / `recover.yml` stop and start it. Default `<service>.service`; `ha.<strategy>.service_unit` overrides it when an HA manager runs the server (Patroni) |
 | `collector` | Collector module, the system user it runs as, and how it connects |
 | `ansible_collections` | Collections this machine needs for the engine (checked by `make validate-local`) |
 | `report_queries` | Optional engine-only PromQL added to the report |
-| `ha.<strategy>` | `family`, `failover`, traits (`semi_sync`, `synchronous`), node limits, mesh and client ports, `ha_endpoint`, and the roles for `provision` and `deploy` |
+| `ha.<strategy>` | `family`, `failover`, traits (`semi_sync`, `synchronous`), node limits, mesh and client ports, `ha_endpoint`, `service_unit`, `auto_failover_wait` (seconds `make promote` waits for an automatic failover; default 5), and the roles for `provision` and `deploy` |
 
 Strategy traits drive the core logic:
 
@@ -131,7 +131,7 @@ Settings: `postgres.version`, `postgres.port`, `postgres.shared_buffers_ratio`, 
 |---|---|---|
 | streaming-replication | manual | asynchronous physical streaming; client picks the writable node (`pg_is_in_recovery()`), no `ha_endpoint` |
 | sync-replication | manual | `synchronous_standby_names = 'ANY n (other nodes)'`, written per node, so any node can become the primary without reconfiguration |
-| patroni | Patroni | `status: planned`, refused at validate time |
+| patroni | Patroni | etcd (official release, TLS with client certificates) on every node as the DCS; Patroni runs the halab cluster (`halab-patroni.service`, the cluster's own unit is masked) and fails over by itself. See [ha/postgres/patroni](../../ha/postgres/patroni/README.md) |
 
 Accounts (created once on the primary, replicated): `exporter` (`pg_monitor`), `repl` (REPLICATION), `bench` (owns the benchmark database), `rewind` (password `db_admin_password`, execute on the file functions `pg_rewind` needs). Standbys authenticate through `~postgres/.pgpass`, so no password sits in `primary_conninfo`. TLS (`ssl=on`, `scram-sha-256`) is mandatory on private networks (`hostssl`).
 
@@ -149,9 +149,11 @@ Recover (`recover.yml -e node=<n>`): a node that returns as a standby is repoint
 
 With `sync-replication` and fewer reachable standbys than `num_sync`, commits wait. After an unplanned failover of a 2-node cluster the new primary has no standby to acknowledge, so writes block until the old primary returns.
 
-Metrics: `engine_postgres.py` emits the neutral topology metrics (`ha_lab_writable` from `pg_is_in_recovery()` and `default_transaction_read_only`; `ha_lab_replication_position` is the WAL byte offset, insert LSN on a primary and replay LSN on a standby), `replication_lag_seconds`, `replication_queue_size{queue="wal_replay"}` in bytes, `ha_lab_sync_standbys`, transactions, deadlocks and lock waits. `postgres_exporter` (`pg_up`, port 19187) runs on every node. The dialect `jmeter/scripts/dialects/postgres.groovy` classifies errors by SQLSTATE; `served_by` is the node address because `cluster_name` is set to it.
+Metrics: `engine_postgres.py` emits the neutral topology metrics (`ha_lab_writable` from `pg_is_in_recovery()` and `default_transaction_read_only`; `ha_lab_replication_position` is the WAL byte offset, insert LSN on a primary and replay LSN on a standby), `replication_lag_seconds`, `replication_queue_size{queue="wal_replay"}` in bytes, `ha_lab_sync_standbys`, transactions, deadlocks and lock waits. `postgres_exporter` (`pg_up`, port 19187) runs on every node. The dialect `jmeter/scripts/dialects/postgres.groovy` classifies errors by SQLSTATE; `served_by` is the node address, read from the custom setting `halab.node` (Patroni overrides `cluster_name`, which the other strategies also set to it).
 
 Verified in containers (Debian trixie, PostgreSQL 17, Docker connection plugin, no systemd). Streaming replication: provisioning, deploy twice (the second changes nothing), topology, switchover, unplanned failover, recover with `pg_rewind` (WAL the old primary held and no standby had was removed), ledger dump, destroy with and without data. Sync replication: provisioning, deploy twice, topology (checks the synchronous standbys), switchover, a switchover refused because the requested node was cut off, unplanned failover, recover (rewind and `postgres_rebuild`), deploy refused over existing data and then `postgres_rebuild_replica`. Also run: the JMeter dialect (prepare and baseline, 0 errors), the collector module, and `postgres_exporter` (`pg_up 1`). Not run against real Ubuntu 24.04 hosts: the systemd units (exporter, collector), the apt and pin tasks on a host that has no PostgreSQL package yet, the firewall, `make plan-host` and `make validate`.
+
+Patroni (`patroni`): the deploy builds streaming replication first (same refusal over existing data), then hands each node's halab cluster to Patroni, the primary first; Patroni takes over the existing data, so nothing is copied twice. The hooks read Patroni's REST API: `topology-facts` adds `status.patroni` (role, state, timeline, replication state), `ha-health` also checks Patroni roles and etcd member health, `switchover-managed` posts `/switchover`, `recover-rejoin` starts `halab-patroni` (and `patronictl reinit` with `postgres_rebuild=true`), `destroy-teardown` gives the cluster back to `postgresql@<version>-halab.service`. Verified in Ubuntu 24.04 systemd containers (arm64, PostgreSQL 17, Patroni 4.1.5 from PGDG, etcd 3.6.16): provisioning, deploy twice, re-provisioning under Patroni, topology, switchover (named, automatic, and refused for a non-synchronous candidate), failover after stopping Patroni and after pausing the leader (async and `synchronous_mode`, acknowledged rows checked), automatic `pg_rewind` of the old leader, `recover` with `postgres_rebuild`, etcd quorum loss and return, destroy with and without data next to a foreign cluster.
 
 ## Planned strategies
 
@@ -159,7 +161,6 @@ Verified in containers (Debian trixie, PostgreSQL 17, Docker connection plugin, 
 |---|---|---|
 | MariaDB | galera | built in (Galera) |
 | MariaDB | maxscale | MaxScale |
-| PostgreSQL | patroni (etcd) | Patroni |
 
 Their descriptor entries exist; their roles and hooks do not.
 

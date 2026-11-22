@@ -29,3 +29,7 @@
     quiet: true
   run_once: true
   when: lab_ha_strategy.synchronous | default(false) and lab_writable | length == 1
+
+- name: Check Patroni and etcd
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-health.yml"
+  when: lab_ha_strategy.failover == 'patroni'

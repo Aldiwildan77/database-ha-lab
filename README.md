@@ -32,7 +32,7 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 | | `galera`, `maxscale` | | | planned, refused at validate time |
 | PostgreSQL 17 (16, 18) | `streaming-replication` | manual, LSN-based, `pg_rewind` recovery | 2 | containers, end to end |
 | | `sync-replication` | manual | 2 | containers, end to end |
-| | `patroni` | | | planned, refused at validate time |
+| | `patroni` | Patroni (etcd DCS) | 3 | systemd containers, end to end |
 
 "End to end" means deploy, idempotent redeploy, health, switchover, unplanned failover, recover, ledger consistency and destroy, run against database containers with the Ansible Docker connection. None of it has run on a real Ubuntu host with systemd yet: package installs, service units and the firewall are untested there.
 
@@ -127,6 +127,7 @@ Every lab default differs from the product's standard port, so the lab can sit n
 | Orchestrator HTTP / raft | 3000 / 10008 | 13000 / 13008 |
 | MySQL Router RW / RO | 6446 / 6447 | 16446 / 16447 |
 | Galera gcomm / IST / SST | 4567 / 4568 / 4444 | 14567 / 14568 / 14444 |
+| Patroni REST API / etcd client / etcd peer | 8008 / 2379 / 2380 | 18008 / 12379 / 12380 |
 
 The full table, including planned components, is in [docs/architecture/engines.md](docs/architecture/engines.md).
 
