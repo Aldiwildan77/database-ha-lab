@@ -29,7 +29,7 @@
         url: "https://{{ hostvars[so_leader].node_fqdn }}:{{ pg_patroni_rest_port }}/switchover"
         method: POST
         ca_path: "{{ pg_etcd_pki_dir }}/ca.crt"
-        url_username: patroni
+        url_username: "{{ pg_patroni_rest_user }}"
         url_password: "{{ db_admin_password }}"
         force_basic_auth: true
         body_format: json

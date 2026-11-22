@@ -54,7 +54,7 @@ patroni:
   # rest_port: 18008  etcd_client_port: 12379  etcd_peer_port: 12380  etcd_version: "3.6.16"
 ```
 
-`ttl`, `loop_wait`, `retry_timeout`, `maximum_lag_on_failover`, `synchronous_mode` and the PostgreSQL parameters are dynamic: `make ha` compares them with the DCS (`GET /config`), sends a `PATCH /config` when they differ, and restarts members whose change needs it (`patronictl restart --pending`). Keep `loop_wait + 2 * retry_timeout <= ttl`.
+`ttl`, `loop_wait`, `retry_timeout`, `maximum_lag_on_failover`, `synchronous_mode` and the PostgreSQL parameters are dynamic: `make ha` compares them with the DCS (`GET /config`), sends a `PATCH /config` when they differ, and restarts members whose change needs it (`patronictl restart --pending`): replicas one at a time, each back to streaming before the next, then the leader. Keep `loop_wait + 2 * retry_timeout <= ttl`.
 
 ## Durability
 
@@ -82,7 +82,7 @@ First deploy:
 3. Each node's halab cluster is stopped cleanly and handed to Patroni, the primary first. Patroni takes over the existing data: the primary starts as a replica, takes the leader key and promotes (timeline + 1); the standbys follow it. No data is copied again.
 4. The dynamic configuration is applied and the role waits for one running leader and every other member streaming.
 
-Re-running `make ha` changes nothing on a healthy cluster. It follows the current leader, not the node with `role: primary`. A node Patroni does not run yet (an interrupted deploy) is first made a standby of the leader with the same checks, then handed over. Adding a node to a running cluster is not supported (etcd's member list is fixed at bootstrap); destroy and redeploy.
+Re-running `make ha` changes nothing on a healthy cluster. It follows the current leader, not the node with `role: primary`. A node Patroni does not run yet (an interrupted deploy) is first made a standby of the leader with the same checks, then handed over. A node added to the inventory later (provision it first, which also updates `pg_hba.conf` on the others) joins a running cluster: an existing etcd member adds it (`etcdctl member add`, refused while etcd is unhealthy), it starts with `initial-cluster-state: existing`, follows the leader and is handed to Patroni. A handover that fails (Patroni does not reach `running`) gives the cluster back to `postgresql@<version>-halab.service` and fails with Patroni's last log lines; an interrupted one is undone by the next deploy or by destroy.
 
 ## Health checks
 
@@ -127,7 +127,7 @@ make recover NODE=db-01 ARGS="-e postgres_rebuild=true"   # patronictl reinit: r
 
 `postgres_rebuild=true` deletes the node's data directory and copies the leader (`pg_basebackup`). Use it only when the rewind fails (`journalctl -u halab-patroni` shows why).
 
-If no node was writable when `make recover` ran (for example the only eligible node was the one being recovered), the rejoin step is skipped and the final health check may fail while Patroni elects; run `make topology` again a few seconds later.
+If no node was writable when `make recover` ran (for example the only eligible node was the one being recovered), the rejoin step still starts Patroni on the node and waits until it runs as a streaming replica or as the leader it elected; `postgres_rebuild` then needs a running leader and is refused without one.
 
 ## etcd quorum loss
 
@@ -156,7 +156,7 @@ Losing one etcd member changes nothing for the database. Patroni's `failsafe_mod
 
 - No watchdog (`watchdog: mode off`). A leader that freezes and resumes can accept commits for up to one Patroni loop before it demotes itself (observed: 2 rows, then rewound away). Use `synchronous_mode` when that matters, or configure the Linux softdog outside the lab.
 - With `synchronous_mode`, a leader crash followed by a stop within a few seconds can leave no eligible synchronous standby: Patroni clears the synchronous set while it restarts a crashed leader, so no replica promotes until the old leader returns (observed after `kill-db` then `stop-db`). This trades availability for no data loss.
-- etcd membership is fixed at bootstrap: replacing or adding a node needs `make destroy` and a new deploy.
+- Nodes can be added, not removed: removing a node from the inventory leaves its etcd member and Patroni member registered (`halab-etcdctl member remove`, `halab-patronictl remove` by hand).
 - `failsafe_mode`, standby clusters, Citus and tags (`nofailover`, `nosync`) are not configured from `config/ha.yml`.
 - The lab CA key is copied to every node (each node signs its own certificate). Certificates are valid for 10 years and are not rotated.
 - No HAProxy or virtual IP: clients must try every node, as the benchmark does.

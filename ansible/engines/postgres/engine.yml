@@ -78,6 +78,7 @@ ha:
   patroni:
     family: replication
     failover: patroni
+    rejoin_without_primary: true   # recover.yml runs the rejoin hook even when no node is writable
     service_unit: halab-patroni.service
     auto_failover_wait: 45
     min_nodes: 3

@@ -35,7 +35,8 @@
       ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/recover-rejoin.yml"
       when:
         - inventory_hostname == node
-        - rc_primary != '' or lab_ha_strategy.family == 'galera'
+        # Strategies whose HA manager rejoins the node (or elects a leader) run the hook without a writable node.
+        - rc_primary != '' or lab_ha_strategy.family == 'galera' or lab_ha_strategy.rejoin_without_primary | default(false)
 
 - name: Verify topology
   ansible.builtin.import_playbook: topology.yml

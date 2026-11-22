@@ -38,6 +38,9 @@
 - name: Issue TLS certificates
   ansible.builtin.include_tasks: pki.yml
 
+- name: Add new members to a running cluster
+  ansible.builtin.include_tasks: join.yml
+
 - name: Write etcd configuration
   ansible.builtin.template:
     src: etcd.conf.yml.j2

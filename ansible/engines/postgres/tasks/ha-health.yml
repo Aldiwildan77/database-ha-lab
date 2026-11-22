@@ -1,5 +1,10 @@
 ---
 # PostgreSQL health checks. Expects lab_topo_all, lab_writable and lab_down (ansible/tasks/ha-health.yml).
+# patroni: its own checks run first, so their diagnostics show even when the generic checks would fail.
+- name: Check Patroni and etcd
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-health.yml"
+  when: lab_ha_strategy.failover == 'patroni'
+
 - name: Check replication topology
   ansible.builtin.assert:
     that:
@@ -29,7 +34,3 @@
     quiet: true
   run_once: true
   when: lab_ha_strategy.synchronous | default(false) and lab_writable | length == 1
-
-- name: Check Patroni and etcd
-  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-health.yml"
-  when: lab_ha_strategy.failover == 'patroni'

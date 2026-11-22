@@ -1,0 +1,23 @@
+---
+# Restarts patroni_restart_member and waits until it runs again (the leader as primary, a replica streaming).
+- name: Restart {{ patroni_restart_member }}
+  ansible.builtin.command:
+    argv: ["{{ pg_patroni_ctl }}", restart, "{{ pg_patroni_scope }}", "{{ patroni_restart_member }}", --pending, --force]
+  register: patroni_restart
+  changed_when: "'Success' in patroni_restart.stdout"
+  run_once: true
+
+- name: Wait until the restarted member runs again ({{ patroni_restart_member }})
+  ansible.builtin.uri:
+    url: "https://{{ hostvars[patroni_restart_member].node_fqdn }}:{{ pg_patroni_rest_port }}/patroni"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_restarted
+  until:
+    - patroni_restarted.json is defined
+    - patroni_restarted.json.state | default('') == 'running'
+    - not (patroni_restarted.json.pending_restart | default(false))
+    - patroni_restarted.json.role | default('') == 'primary' or patroni_restarted.json.replication_state | default('') == 'streaming'
+  retries: "{{ patroni_wait_retries }}"
+  delay: "{{ patroni_wait_delay }}"
+  run_once: true
