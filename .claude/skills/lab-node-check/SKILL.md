@@ -40,6 +40,34 @@ Two questions: **can this machine be a node**, and **are there enough nodes for 
 
 All nodes in a lab run one engine and one strategy. Switching needs `make destroy` (`DATA=1` when the server packages change).
 
+## 1b. Minimum VM / bare-metal spec per node
+
+Per database node. "Min" runs the scenario for correctness tests (switchover, failover, recover, RPO) with the default dataset (100k rows); latency numbers at "Min" are noisy. "Recommended" is for benchmarks you will compare. Bare metal uses the same figures; keep all nodes identical so the hardware does not decide which node looks faster.
+
+| DB | HA strategy | Min vCPU / RAM / disk | Recommended | Why it needs more |
+|---|---|---|---|---|
+| MySQL | `async-replication`, `semi-sync` | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | Set `mysql.buffer_pool_ratio: 0.25` at 2 GB |
+| MySQL | `orchestrator` | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | + Orchestrator (~100 MB, SQLite + raft) |
+| MySQL | `innodb-cluster` | 2 / 4 GB / 20 GB | 4 / 8 GB / 50 GB SSD | Group Replication caches, MySQL Router, clone recovery |
+| MySQL | `percona-xtradb-cluster` | 2 / 4 GB / 30 GB | 4 / 8 GB / 50 GB SSD | Galera gcache, SST needs room for a second data copy |
+| MariaDB | `async-replication`, `semi-sync` | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | Set `mariadb.buffer_pool_ratio: 0.25` at 2 GB |
+| MariaDB | `galera` | 2 / 4 GB / 30 GB | 4 / 8 GB / 50 GB SSD | gcache, mariabackup SST copy |
+| PostgreSQL | `streaming-replication`, `sync-replication` | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | `wal_keep_size` 1 GB; `shared_buffers_ratio: 0.25` default |
+| PostgreSQL | `patroni` | 2 / 4 GB / 20 GB SSD | 4 / 8 GB / 50 GB SSD | + etcd and Patroni; etcd needs fast fsync (SSD) or the leader flaps |
+
+Everything else:
+
+| Item | Min | Recommended | Notes |
+|---|---|---|---|
+| Disk type | any | SSD / NVMe | HDD or shared disks (3 VMs on one host disk) make commit latency noisy |
+| Disk, `soak-test` | + 20 GB | + 50 GB | 1 h of binlogs / WAL at full load |
+| Network, same DC | 1 Gbit | 1–10 Gbit, < 1 ms between nodes | |
+| Network, multi-DC | any | stable link; note RTT in the report | Semi-sync and sync replication pay one RTT per commit |
+| CPU type (VM) | any | `host` passthrough, no overcommit | Stolen CPU time shows up as latency |
+| Benchmark client (this machine) | 2 cores / 4 GB free | 4 cores / 8 GB free | JMeter (Java) + Docker Prometheus/Grafana |
+
+Lab total = nodes x per-node spec. Example: MariaDB `galera` minimum = 3 x (2 vCPU, 4 GB, 30 GB) = 6 vCPU, 12 GB, 90 GB.
+
 ## 2. Per-node requirements
 
 | Check | Requirement | How it fails |
