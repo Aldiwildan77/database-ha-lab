@@ -1,0 +1,24 @@
+---
+# etcd (Patroni's DCS) from the official release tarball, so no distro etcd.service starts on the standard ports.
+etcd_default_version: "3.6.16"
+etcd_version: "{{ pg_patroni.etcd_version | default(etcd_default_version) }}"
+etcd_default_checksums:
+  amd64: c8c0d96d8292ef085deabbf735e9561d3d396768e4d606df005aa25964f21911
+  arm64: ad756ff27ba21e3488cfb84d00f3f4ad8d9b60a93e20f5be5b230a4aab1dc053
+etcd_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+etcd_arch: "{{ etcd_arch_map[ansible_architecture] }}"
+etcd_release: "etcd-v{{ etcd_version }}-linux-{{ etcd_arch }}"
+etcd_url: "https://github.com/etcd-io/etcd/releases/download/v{{ etcd_version }}"
+# Pinned checksum for the default version; another version is checked against the release's SHA256SUMS.
+etcd_checksum: >-
+  {{ ('sha256:' ~ etcd_default_checksums[etcd_arch]) if etcd_version == etcd_default_version
+     else ('sha256:' ~ etcd_url ~ '/SHA256SUMS') }}
+etcd_install_dir: "/opt/halab-etcd-v{{ etcd_version }}"
+etcd_user: halab-etcd
+etcd_cluster_token: "halab-{{ lab_environment }}-{{ pg_patroni_scope }}"
+# The lab CA is created on this node and copied to the others.
+etcd_ca_node: "{{ groups['db_nodes'] | sort | first }}"
+etcd_wait_retries: 40
+etcd_wait_delay: 3

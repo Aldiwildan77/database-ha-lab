@@ -1,0 +1,64 @@
+---
+# patroni (from ha-health.yml, before the generic checks): one leader, every other member streaming, nothing pending,
+# every etcd member healthy. Every check runs and the task fails once, listing all problems.
+- name: List the Patroni cluster
+  ansible.builtin.command:
+    argv: ["{{ pg_patroni_ctl }}", list, "{{ pg_patroni_scope }}"]
+  register: health_patroni_list
+  become: true
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ (ansible_play_hosts_all | difference(lab_down) + ansible_play_hosts_all) | first }}"
+  run_once: true
+
+- name: Show the Patroni cluster
+  ansible.builtin.debug:
+    msg: "{{ health_patroni_list.stdout_lines | default([]) + (health_patroni_list.stderr_lines | default([])) }}"
+  run_once: true
+
+- name: Check etcd members
+  ansible.builtin.command:
+    argv: ["{{ pg_etcd_ctl }}", endpoint, health, --cluster, --write-out=json]
+  register: health_etcd
+  become: true
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ (ansible_play_hosts_all | difference(lab_down) + ansible_play_hosts_all) | first }}"
+  run_once: true
+
+- name: Check Patroni and etcd
+  ansible.builtin.assert:
+    that: hp_problems | length == 0
+    fail_msg: "Unhealthy Patroni cluster: {{ hp_problems | join('; ') }}. Run halab-patronictl list and halab-etcdctl endpoint health --cluster on a node."
+    quiet: true
+  vars:
+    hp_reachable: "{{ lab_topo_all | selectattr('status.patroni.role', 'defined') | list }}"
+    hp_unreachable: "{{ lab_topo_all | rejectattr('status.patroni.role', 'defined') | map(attribute='node') | list }}"
+    hp_leaders: "{{ hp_reachable | selectattr('status.patroni.role', 'equalto', 'primary') | selectattr('status.patroni.state', 'equalto', 'running') | map(attribute='node') | list }}"
+    hp_not_streaming: >-
+      {{ hp_reachable | rejectattr('status.patroni.role', 'equalto', 'primary')
+         | rejectattr('status.patroni.replication_state', 'equalto', 'streaming') | map(attribute='node') | list }}
+    hp_pending: "{{ hp_reachable | selectattr('status.patroni.pending_restart') | map(attribute='node') | list }}"
+    hp_paused: "{{ hp_reachable | selectattr('status.patroni.paused') | map(attribute='node') | list }}"
+    hp_etcd: "{{ health_etcd.stdout | from_json if health_etcd.stdout | default('') is match('\\s*\\[') else [] }}"
+    hp_etcd_bad: "{{ hp_etcd | rejectattr('health') | map(attribute='endpoint') | list }}"
+    hp_sync: "{{ pg_patroni.synchronous_mode | default(false) | bool }}"
+    hp_checks:
+      - "{{ 'Patroni REST API unreachable on ' ~ hp_unreachable | join(', ') if hp_unreachable else '' }}"
+      - "{{ '' if hp_leaders | length == 1 else 'expected one running leader, found ' ~ (hp_leaders | join(', ') or 'none') }}"
+      - "{{ 'not streaming from the leader: ' ~ hp_not_streaming | join(', ') if hp_not_streaming else '' }}"
+      - "{{ 'pending restart: ' ~ hp_pending | join(', ') if hp_pending else '' }}"
+      - "{{ 'paused: ' ~ hp_paused | join(', ') if hp_paused else '' }}"
+      - >-
+        {{ '' if lab_writable | length == 1 and hp_leaders | length == 1 and lab_writable[0] == hp_leaders[0]
+           else 'writable nodes ' ~ lab_writable ~ ' differ from the Patroni leader ' ~ hp_leaders }}
+      - >-
+        {{ '' if not hp_sync or (lab_writable | length == 1
+             and hostvars[lab_writable[0]].lab_topo.status.sync_standbys | int >= pg_patroni.synchronous_node_count | default(1) | int)
+           else 'fewer synchronous standbys than synchronous_node_count on the leader' }}
+      - >-
+        {{ '' if health_etcd.rc == 0 and hp_etcd_bad | length == 0 and hp_etcd | length == ansible_play_hosts_all | length
+           else 'etcd unhealthy (without a DCS quorum Patroni demotes the leader and the cluster is read-only): '
+                ~ ((hp_etcd_bad | join(', ') ~ ' ' ~ health_etcd.stderr | default('')) | trim or health_etcd.stdout | default('')) }}
+    hp_problems: "{{ hp_checks | map('trim') | select | list }}"
+  run_once: true

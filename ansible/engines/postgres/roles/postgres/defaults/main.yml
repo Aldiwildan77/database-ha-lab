@@ -20,6 +20,8 @@ postgres_shared_buffers_mb: "{{ [128, (ansible_facts['memtotal_mb'] * postgres_s
 postgres_base_config:
   listen_addresses: "*"
   cluster_name: "{{ node_fqdn }}"
+  # Patroni sets cluster_name to its scope, so clients read the node from this custom setting.
+  halab.node: "{{ node_fqdn }}"
   max_connections: 500
   shared_buffers: "{{ postgres_shared_buffers_mb }}MB"
   effective_cache_size: "{{ [256, (ansible_facts['memtotal_mb'] * 0.5) | int] | max }}MB"

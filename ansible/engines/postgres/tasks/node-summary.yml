@@ -7,7 +7,7 @@
     group/community.postgresql.all: "{{ pg_conn }}"
   community.postgresql.postgresql_query:
     query: >-
-      SELECT current_setting('server_version') AS version, current_setting('cluster_name') AS cluster,
+      SELECT current_setting('server_version') AS version, COALESCE(current_setting('halab.node', true), current_setting('cluster_name')) AS cluster,
              current_setting('port') AS port, current_setting('wal_level') AS wal_level,
              current_setting('data_checksums') AS data_checksums, current_setting('ssl') AS ssl,
              pg_is_in_recovery() AS in_recovery

@@ -17,6 +17,8 @@ config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
 paths_written:
   - /etc/mysql/mariadb.conf.d/zz-ha-lab.cnf
   - /etc/mysql/mariadb.conf.d/zz-ha-lab-role.cnf
+  - /etc/mysql/mariadb.conf.d/zz-ha-lab-galera.cnf (galera)
+  - /etc/mysql/halab-galera-tls (galera on private networks)
   - /etc/mysql/halab-tls (MariaDB before 11.4)
   - /etc/ha-lab
   - /etc/halab
@@ -45,7 +47,7 @@ ports:
   maxscale_admin: {default: 18989, standard: 8989, config: maxscale.admin_port}
 packages:
   default: [mariadb-server, mariadb-client]
-  galera: [mariadb-server, mariadb-client, galera-4]
+  galera: [mariadb-server, mariadb-client, galera-4, mariadb-backup, socat]
 apt_repository:
   default: deb.mariadb.org (MariaDB repository, pinned to mariadb-* packages only)
 conflicting_packages:
@@ -73,7 +75,6 @@ ha:
     provision: [{role: mariadb}]
     deploy: [{role: mariadb-replication}]
   galera:
-    status: planned
     family: galera
     failover: galera
     min_nodes: 3

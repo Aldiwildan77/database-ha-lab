@@ -1,0 +1,49 @@
+---
+# Converges the DCS settings (bootstrap.dcs applies only when the cluster is created) and restarts members that
+# need it (for example after max_connections changes): replicas one at a time, each back to streaming, then the leader.
+# Expects patroni_leader (leader.yml, run by main.yml).
+- name: Read the dynamic configuration
+  ansible.builtin.uri:
+    url: "https://{{ node_fqdn }}:{{ pg_patroni_rest_port }}/config"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_config_now
+  run_once: true
+
+- name: Change the dynamic configuration
+  ansible.builtin.uri:
+    url: "https://{{ node_fqdn }}:{{ pg_patroni_rest_port }}/config"
+    method: PATCH
+    ca_path: "{{ patroni_ca }}"
+    url_username: "{{ patroni_rest_user }}"
+    url_password: "{{ db_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: "{{ patroni_dcs }}"
+  run_once: true
+  changed_when: true
+  no_log: true
+  when: patroni_config_now.json | combine(patroni_dcs, recursive=true) != patroni_config_now.json
+
+- name: Wait for Patroni to apply the change
+  ansible.builtin.pause:
+    seconds: "{{ (patroni_dcs.loop_wait | int) + 2 }}"
+  when: patroni_config_now.json | combine(patroni_dcs, recursive=true) != patroni_config_now.json
+
+- name: Find members with pending settings
+  ansible.builtin.uri:
+    url: "https://{{ node_fqdn }}:{{ pg_patroni_rest_port }}/cluster"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_pending
+  run_once: true
+
+- name: Restart members with pending settings, the leader last
+  ansible.builtin.include_tasks: restart-member.yml
+  loop: "{{ patroni_pending_replicas + patroni_pending_leader }}"
+  loop_control:
+    loop_var: patroni_restart_member
+  vars:
+    patroni_pending_members: "{{ patroni_pending.json.members | selectattr('pending_restart', 'defined') | selectattr('pending_restart') | map(attribute='name') | list }}"
+    patroni_pending_replicas: "{{ patroni_pending_members | reject('equalto', patroni_leader) | sort }}"
+    patroni_pending_leader: "{{ patroni_pending_members | select('equalto', patroni_leader) | list }}"

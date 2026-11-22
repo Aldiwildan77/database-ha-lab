@@ -1,0 +1,155 @@
+---
+# First deploy: the replication role builds streaming replication from the node with role primary (with its checks
+# against replacing data), then each node's halab cluster is handed to Patroni, the primary first. Patroni keeps the
+# data: it takes over the running primary's timeline and the standbys follow it. Later deploys only converge settings.
+- name: Require passwords
+  ansible.builtin.assert:
+    that:
+      - db_replication_password | length >= 16
+      - db_admin_password | length >= 16
+    fail_msg: >-
+      patroni needs db_replication_password and db_admin_password (>= 16 chars) in config/secrets.yml or
+      LAB_DB_*_PASSWORD; db_admin_password is the pg_rewind role's password and the REST API password.
+    quiet: true
+  no_log: true
+
+- name: Check whether Patroni is installed
+  ansible.builtin.command:
+    argv: [dpkg-query, --show, "--showformat=${db:Status-Abbrev}", patroni]
+  register: patroni_package_before
+  changed_when: false
+  failed_when: false
+
+- name: Take Patroni from PGDG (the distro version may not support this PostgreSQL)
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/halab-patroni
+    mode: "0644"
+    content: |
+      Package: patroni
+      Pin: origin apt.postgresql.org
+      Pin-Priority: 1001
+  register: patroni_pin
+
+- name: Install Patroni
+  ansible.builtin.apt:
+    name: "{{ patroni_packages }}"
+    state: present
+    update_cache: "{{ patroni_pin.changed }}"
+
+- name: Record that the lab installed Patroni
+  ansible.builtin.copy:
+    dest: "{{ pg_patroni_package_marker }}"
+    mode: "0644"
+    force: false
+    content: "patroni installed by database-ha-lab\n"
+  when: not (patroni_package_before.stdout | default('')).startswith('ii')
+
+- name: Let the postgres user read the etcd client certificate
+  ansible.builtin.user:
+    name: postgres
+    groups: halab-etcd
+    append: true
+
+- name: Create the Patroni directory
+  ansible.builtin.file:
+    path: "{{ pg_patroni_dir }}"
+    state: directory
+    owner: root
+    group: postgres
+    mode: "0750"
+
+- name: Write the Patroni configuration
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: "{{ pg_patroni_config }}"
+    owner: root
+    group: postgres
+    mode: "0640"
+  notify: Reload patroni
+
+- name: Install the Patroni unit
+  ansible.builtin.template:
+    src: halab-patroni.service.j2
+    dest: "/etc/systemd/system/{{ pg_patroni_unit }}.service"
+    mode: "0644"
+
+- name: Install the patronictl wrapper
+  ansible.builtin.template:
+    src: halab-patronictl.j2
+    dest: "{{ pg_patroni_ctl }}"
+    mode: "0750"
+
+- name: Check which nodes Patroni runs
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_marker }}"
+  register: patroni_marker
+
+- name: Check for an unfinished handover
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_handover_marker }}"
+  register: patroni_handover_marker
+
+- name: Give the cluster back after an interrupted handover
+  ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/patroni-giveback.yml"
+  when:
+    - patroni_handover_marker.stat.exists
+    - not patroni_marker.stat.exists
+
+- name: Decide whether Patroni already took over
+  ansible.builtin.set_fact:
+    patroni_managed_nodes: >-
+      {{ ansible_play_hosts | map('extract', hostvars) | selectattr('patroni_marker.stat.exists')
+         | map(attribute='inventory_hostname') | list }}
+  run_once: true
+
+- name: Build streaming replication from {{ patroni_initial_primary }}
+  ansible.builtin.include_role:
+    name: postgres-replication
+  when: patroni_managed_nodes | length == 0
+
+- name: Hand the primary to Patroni
+  ansible.builtin.include_tasks: handover.yml
+  when:
+    - patroni_managed_nodes | length == 0
+    - inventory_hostname == patroni_initial_primary
+
+- name: Find the Patroni leader
+  ansible.builtin.include_tasks: leader.yml
+  vars:
+    patroni_ask: "{{ patroni_managed_nodes[0] if patroni_managed_nodes else patroni_initial_primary }}"
+
+# A node Patroni does not run yet (a failed earlier deploy, or a node added later) first follows the leader with the
+# replication role's checks, so Patroni never sees a different system identifier.
+- name: Make the remaining nodes standbys of the leader
+  ansible.builtin.include_role:
+    name: postgres-replication
+    tasks_from: "{{ item }}"
+  vars:
+    replication_primary: "{{ patroni_leader }}"
+  loop: [passfile.yml, standby.yml]
+  when:
+    - patroni_managed_nodes | length > 0
+    - not patroni_marker.stat.exists
+    - inventory_hostname != patroni_leader
+
+- name: Hand the standbys to Patroni
+  ansible.builtin.include_tasks: handover.yml
+  when:
+    - not patroni_marker.stat.exists
+    - inventory_hostname != patroni_leader
+
+- name: Keep Patroni running
+  ansible.builtin.systemd_service:
+    name: "{{ pg_patroni_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending reload
+  ansible.builtin.meta: flush_handlers
+
+- name: Apply the dynamic settings
+  ansible.builtin.include_tasks: dynamic.yml
+
+- name: Wait for every member to stream from the leader
+  ansible.builtin.include_tasks: wait.yml

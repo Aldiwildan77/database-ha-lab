@@ -1,0 +1,6 @@
+#!/bin/sh
+# Managed by database-ha-lab: etcdctl against the lab etcd cluster with the node's client certificate.
+exec {{ etcd_install_dir }}/etcdctl \
+  --endpoints {% for n in groups['db_nodes'] | sort %}https://{{ hostvars[n].node_fqdn }}:{{ pg_etcd_client_port }}{{ ',' if not loop.last }}{% endfor %} \
+  --cacert {{ pg_etcd_pki_dir }}/ca.crt --cert {{ pg_etcd_pki_dir }}/node.crt --key {{ pg_etcd_pki_dir }}/node.key \
+  --dial-timeout 3s --command-timeout 5s "$@"

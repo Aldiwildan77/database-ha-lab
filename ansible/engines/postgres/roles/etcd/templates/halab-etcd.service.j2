@@ -1,0 +1,22 @@
+[Unit]
+Description=etcd for Patroni (database-ha-lab)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+User={{ etcd_user }}
+Group={{ etcd_user }}
+ExecStart={{ etcd_install_dir }}/etcd --config-file {{ pg_etcd_conf_dir }}/etcd.conf.yml
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{ pg_etcd_data_dir }}
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -126,7 +126,7 @@
 
     - name: Wait for automatic promotion
       ansible.builtin.pause:
-        seconds: "{{ auto_failover_wait | default(5) }}"
+        seconds: "{{ auto_failover_wait | default(lab_ha_strategy.auto_failover_wait | default(5)) }}"
       when: failover_mode == 'failover'
 
 - name: Verify and write events

@@ -1,0 +1,49 @@
+---
+# patroni: gives the halab cluster back to postgresql@<version>-halab.service (stops Patroni, unmasks the unit, sets
+# start.conf to auto, starts the cluster with pg_ctlcluster). Used by destroy, and by the patroni role when a handover
+# failed or was interrupted. Data is kept.
+- name: Stop Patroni
+  ansible.builtin.systemd_service:
+    name: "{{ pg_patroni_unit }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Unmask the cluster unit
+  ansible.builtin.systemd_service:
+    name: "postgresql@{{ pg_version }}-{{ pg_cluster }}.service"
+    masked: false
+    daemon_reload: true
+
+- name: Start the cluster with the host
+  ansible.builtin.copy:
+    dest: "{{ pg_conf_dir }}/start.conf"
+    content: "auto\n"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+
+# PostgreSQL started by pg_ctlcluster reads the configuration in /etc; these are Patroni's copies in the data dir.
+- name: Remove Patroni's files in the data directory
+  ansible.builtin.file:
+    path: "{{ pg_data_dir }}/{{ item }}"
+    state: absent
+  loop: [postgresql.conf, postgresql.conf.backup, patroni.dynamic.json]
+
+- name: Start the cluster
+  ansible.builtin.command:
+    argv: [pg_ctlcluster, "{{ pg_version }}", "{{ pg_cluster }}", start]
+  register: giveback_start
+  changed_when: giveback_start.rc == 0
+  failed_when: giveback_start.rc not in [0, 2]
+
+- name: Wait for the PostgreSQL socket
+  ansible.builtin.wait_for:
+    path: "{{ pg_socket_dir }}/.s.PGSQL.{{ pg_port }}"
+    timeout: 120
+
+- name: Remove the Patroni markers
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: ["{{ pg_patroni_marker }}", "{{ pg_patroni_handover_marker }}"]

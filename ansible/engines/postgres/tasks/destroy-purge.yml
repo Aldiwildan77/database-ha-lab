@@ -30,13 +30,29 @@
     autoremove: true
   when: destroy_marker.stat.exists and destroy_clusters.stdout | trim == ''
 
+- name: Read the Patroni package marker
+  ansible.builtin.stat:
+    path: "{{ pg_patroni_package_marker }}"
+  register: destroy_patroni_package
+
+- name: Purge Patroni when the lab installed it
+  ansible.builtin.apt:
+    name: [patroni, python3-etcd]
+    state: absent
+    purge: true
+    autoremove: true
+  when: destroy_patroni_package.stat.exists
+
 - name: Delete lab files
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - "{{ pg_marker_file }}"
+    - "{{ pg_conf_dir }}"   # pg_dropcluster leaves the lab's conf.d file behind
     - "{{ pg_passfile }}"
     - /etc/postgres_exporter
     - /etc/apt/preferences.d/postgresql
+    - /etc/apt/preferences.d/halab-patroni
+    - "{{ pg_patroni_package_marker }}"
   when: destroy_marker.stat.exists

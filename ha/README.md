@@ -25,7 +25,7 @@ ha_provider: streaming-replication # one of the engine's strategies below
 |---|---|---|---|
 | [async-replication](mariadb/async-replication/README.md) | manual (`make promote`) | the primary has written it locally | possible: anything not yet received by a replica |
 | [semi-sync](mariadb/semi-sync/README.md) | manual | one replica received it, or the timeout expired | possible after a timeout fallback |
-| `galera` | planned | | |
+| [galera](mariadb/galera/README.md) | none needed (multi-primary) | every node certified it | not while a primary component exists; a lost quorum blocks writes |
 | `maxscale` | planned | | |
 
 ## PostgreSQL
@@ -34,7 +34,7 @@ ha_provider: streaming-replication # one of the engine's strategies below
 |---|---|---|---|
 | [streaming-replication](postgres/streaming-replication/README.md) | manual (`make promote`) | the primary has flushed its WAL locally | possible: WAL not yet received by a standby |
 | [sync-replication](postgres/sync-replication/README.md) | manual | `num_sync` standbys acknowledged it (`synchronous_commit` level) | possible when every acknowledging standby is lost with the primary; commits wait instead of falling back |
-| `patroni` | planned | | |
+| [patroni](postgres/patroni/README.md) | automatic (Patroni, etcd DCS) | the leader flushed its WAL; with `synchronous_mode`, the synchronous standby too | async: WAL no replica received (a replica more than `maximum_lag_on_failover` behind is not promoted); `synchronous_mode`: none |
 
 Planned strategies are refused by `make validate-config` until their roles exist.
 

@@ -1,0 +1,21 @@
+---
+# Sets patroni_leader and patroni_members (from GET /cluster on patroni_ask) on every host.
+- name: Read the Patroni cluster
+  ansible.builtin.uri:
+    url: "https://{{ hostvars[patroni_ask].node_fqdn }}:{{ pg_patroni_rest_port }}/cluster"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_cluster
+  until:
+    - patroni_cluster.json is defined
+    - patroni_cluster.json.members | default([]) | selectattr('role', 'equalto', 'leader') | selectattr('state', 'equalto', 'running') | list | length == 1
+  retries: "{{ patroni_wait_retries }}"
+  delay: "{{ patroni_wait_delay }}"
+  delegate_to: "{{ patroni_ask }}"
+  run_once: true
+
+- name: Record the leader
+  ansible.builtin.set_fact:
+    patroni_leader: "{{ (patroni_cluster.json.members | selectattr('role', 'equalto', 'leader') | first).name }}"
+    patroni_members: "{{ patroni_cluster.json.members }}"
+  run_once: true

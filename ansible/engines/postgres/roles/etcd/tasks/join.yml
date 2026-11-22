@@ -1,0 +1,86 @@
+---
+# A node without etcd data joins a cluster that already runs on other nodes: an existing member adds it
+# (etcdctl member add, one at a time) and it starts with initial-cluster-state: existing and the current member list.
+# Sets etcd_joining and, on joining nodes, etcd_initial_cluster.
+- name: Check for etcd data on this node
+  ansible.builtin.stat:
+    path: "{{ pg_etcd_data_dir }}/member"
+  register: etcd_member_dir
+
+- name: Find the nodes that are already etcd members
+  ansible.builtin.set_fact:
+    etcd_existing_nodes: >-
+      {{ ansible_play_hosts | map('extract', hostvars) | selectattr('etcd_member_dir.stat.exists')
+         | map(attribute='inventory_hostname') | list }}
+  run_once: true
+
+- name: Decide whether this node joins a running cluster
+  ansible.builtin.set_fact:
+    etcd_joining: "{{ etcd_existing_nodes | length > 0 and not etcd_member_dir.stat.exists }}"
+    etcd_peer_url: "https://{{ node_fqdn }}:{{ pg_etcd_peer_port }}"
+
+- name: Join the running cluster
+  when: ansible_play_hosts | map('extract', hostvars, 'etcd_joining') | select | list | length > 0
+  block:
+    - name: Require a healthy cluster before adding members
+      ansible.builtin.command:
+        argv: ["{{ pg_etcd_ctl }}", endpoint, health, --cluster]
+      register: etcd_join_health
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ etcd_existing_nodes | first | default(inventory_hostname) }}"
+      run_once: true
+
+    - name: Refuse to add members to an unhealthy cluster
+      ansible.builtin.fail:
+        msg: >-
+          {{ ansible_play_hosts | map('extract', hostvars) | selectattr('etcd_joining') | map(attribute='inventory_hostname') | list }}
+          would join the etcd cluster of {{ etcd_existing_nodes }}, but it is unhealthy
+          ({{ (etcd_join_health.stdout ~ ' ' ~ etcd_join_health.stderr) | trim }}). Fix etcd first
+          (halab-etcdctl endpoint health --cluster).
+      when: etcd_join_health.rc != 0
+      run_once: true
+
+    - name: Read the etcd members
+      ansible.builtin.command:
+        argv: ["{{ pg_etcd_ctl }}", member, list, --write-out=json]
+      register: etcd_members_before
+      changed_when: false
+      delegate_to: "{{ etcd_existing_nodes | first | default(inventory_hostname) }}"
+      run_once: true
+
+    # An earlier interrupted join may have added the member already.
+    - name: Add this node as an etcd member
+      ansible.builtin.command:
+        argv: ["{{ pg_etcd_ctl }}", member, add, "{{ inventory_hostname }}", "--peer-urls={{ etcd_peer_url }}"]
+      delegate_to: "{{ etcd_existing_nodes | first | default(inventory_hostname) }}"
+      throttle: 1
+      changed_when: true
+      when:
+        - etcd_joining
+        - etcd_peer_url not in ((etcd_members_before.stdout | from_json).members | map(attribute='peerURLs') | flatten)
+
+    - name: Read the etcd members after adding
+      ansible.builtin.command:
+        argv: ["{{ pg_etcd_ctl }}", member, list, --write-out=json]
+      register: etcd_members_after
+      changed_when: false
+      delegate_to: "{{ etcd_existing_nodes | first | default(inventory_hostname) }}"
+      run_once: true
+
+    # A member that has not started yet has no name; it is named after the inventory node with its peer URL.
+    - name: Build the member list for the new members
+      ansible.builtin.set_fact:
+        etcd_initial_cluster: >-
+          {%- set names = {} -%}
+          {%- for n in groups['db_nodes'] -%}
+          {%- set _ = names.update({'https://' ~ hostvars[n].node_fqdn ~ ':' ~ pg_etcd_peer_port: n}) -%}
+          {%- endfor -%}
+          {%- set out = [] -%}
+          {%- for m in (etcd_members_after.stdout | from_json).members -%}
+          {%- for u in m.peerURLs -%}
+          {%- set _ = out.append((m.name or names.get(u, '')) ~ '=' ~ u) -%}
+          {%- endfor -%}
+          {%- endfor -%}
+          {{ out | sort | join(',') }}
+      when: etcd_joining
