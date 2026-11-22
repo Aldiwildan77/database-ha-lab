@@ -28,11 +28,21 @@
   when: node_network_type == 'tailscale'
 
 - name: Find the node's address on its lab network
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -o
+      - -4
+      - addr
+      - show
+      - dev
+      - "{{ node_interface }}"
+  register: node_interface_addr
+  changed_when: false
+
+- name: Extract the node's IPv4 address
   ansible.builtin.set_fact:
-    node_ip: >-
-      {{ ((node_ts.stdout | from_json).Self.TailscaleIPs | select('match', '^\\d+\\.') | first | default(''))
-         if node_network_type == 'tailscale'
-         else ((ansible_facts[node_interface | replace('-', '_')] | default({})).ipv4 | default({})).address | default('') }}
+    node_ip: "{{ node_interface_addr.stdout | regex_findall('inet ([0-9.]+)') | first | default('') }}"
 
 - name: Check the node address belongs to its network
   ansible.builtin.command:
@@ -68,7 +78,7 @@
   ansible.builtin.wait_for:
     host: "{{ hostvars[item].node_address }}"
     port: "{{ hostvars[item].ansible_port | default(22) }}"
-    timeout: 8
+    timeout: 30
   loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
 
 - name: Read clock synchronisation state
