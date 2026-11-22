@@ -1,0 +1,9 @@
+---
+# One member at a time, so the cluster keeps quorum.
+- name: Restart etcd
+  ansible.builtin.systemd_service:
+    name: "{{ pg_etcd_unit }}"
+    state: restarted
+    daemon_reload: true
+  throttle: 1
+  when: not (etcd_started.changed | default(false))

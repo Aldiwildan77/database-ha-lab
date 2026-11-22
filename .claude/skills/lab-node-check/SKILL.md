@@ -39,7 +39,9 @@ Status: ✅ ready · ❌ planned (refused by `make validate-config`). Counts and
 | PostgreSQL | Failover, manual promote | `sync-replication` | 3 ✅ (2 works; losing the standby blocks commits) | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | |
 | PostgreSQL | Recover old primary (pg_rewind) | `streaming-replication`, `sync-replication` | 2 ✅ | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | Needs `db_admin_password` |
 | PostgreSQL | Network disruption | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | 2 / 2 GB / 20 GB | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | |
-| PostgreSQL | Failover, automatic | `patroni` | 3 ❌ (odd, etcd on the same nodes) | 2 / 4 GB / 20 GB SSD | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | planned; etcd needs fast fsync |
+| PostgreSQL | Switchover | `patroni` | 3 ✅ (odd, etcd on the same nodes) | 2 / 4 GB / 20 GB SSD | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | Patroni REST `/switchover` |
+| PostgreSQL | Failover, automatic | `patroni` | 3 ✅ (odd, etcd on the same nodes) | 2 / 4 GB / 20 GB SSD | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | New leader within ~ttl (30 s); etcd needs fast fsync |
+| PostgreSQL | DCS quorum loss (etcd) | `patroni` | 3 ✅; 5 to survive 2 failures | 2 / 4 GB / 20 GB SSD | 4 / 8 GB / 50 GB SSD | x86_64, aarch64 | Leader demotes, cluster read-only until etcd quorum returns |
 
 Lab total = VMs x spec. Example: PostgreSQL `streaming-replication`, recommended 3 nodes at minimum spec = 6 vCPU, 6 GB RAM, 60 GB disk.
 

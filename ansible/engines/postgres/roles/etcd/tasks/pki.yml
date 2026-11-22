@@ -1,0 +1,83 @@
+---
+# A lab CA (created once on etcd_ca_node) signs one certificate per node. etcd uses it for peer and client TLS with
+# client certificate authentication; Patroni uses it for etcd and for its REST API.
+- name: Check for the lab CA
+  ansible.builtin.stat:
+    path: "{{ pg_etcd_pki_dir }}/ca.crt"
+  register: etcd_ca
+  delegate_to: "{{ etcd_ca_node }}"
+  run_once: true
+
+- name: Create the lab CA
+  ansible.builtin.command:
+    argv: [openssl, req, -x509, -newkey, ec, -pkeyopt, "ec_paramgen_curve:prime256v1", -nodes,
+           -keyout, ca.key, -out, ca.crt, -days, "3650", -subj, "/CN=halab-etcd-ca-{{ lab_environment }}"]
+    chdir: "{{ pg_etcd_pki_dir }}"
+  delegate_to: "{{ etcd_ca_node }}"
+  run_once: true
+  changed_when: true
+  when: not etcd_ca.stat.exists
+
+- name: Read the lab CA
+  ansible.builtin.slurp:
+    src: "{{ pg_etcd_pki_dir }}/{{ item }}"
+  loop: [ca.crt, ca.key]
+  register: etcd_ca_files
+  delegate_to: "{{ etcd_ca_node }}"
+  run_once: true
+  no_log: true
+
+- name: Copy the lab CA to every node
+  ansible.builtin.copy:
+    dest: "{{ pg_etcd_pki_dir }}/{{ item.item }}"
+    content: "{{ item.content | b64decode }}"
+    owner: root
+    group: "{{ 'root' if item.item == 'ca.key' else etcd_user }}"
+    mode: "{{ '0600' if item.item == 'ca.key' else '0644' }}"
+  loop: "{{ etcd_ca_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: etcd_ca_copy
+  no_log: true
+
+- name: Record the certificate's names
+  ansible.builtin.copy:
+    dest: "{{ pg_etcd_pki_dir }}/node.san"
+    content: "{{ etcd_san }}\n"
+    mode: "0644"
+  vars:
+    etcd_san: >-
+      {{ ((['IP:' ~ node_fqdn] if (node_fqdn is match('^[0-9.]+$') or ':' in node_fqdn) else ['DNS:' ~ node_fqdn])
+          + ['DNS:' ~ inventory_hostname, 'DNS:localhost', 'IP:127.0.0.1']) | unique | join(',') }}
+  register: etcd_san_file
+
+- name: Check for the node certificate
+  ansible.builtin.stat:
+    path: "{{ pg_etcd_pki_dir }}/node.crt"
+  register: etcd_node_cert
+
+- name: Issue the node certificate
+  ansible.builtin.shell: |
+    set -eu
+    cd {{ pg_etcd_pki_dir }}
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout node.key -out node.csr \
+      -subj "/CN={{ inventory_hostname }}"
+    printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth,clientAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
+      "$(cat node.san)" > node.ext
+    openssl x509 -req -in node.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -out node.crt -extfile node.ext
+    rm -f node.csr node.ext
+  args:
+    executable: /bin/bash
+  changed_when: true
+  notify: Restart etcd
+  when: not etcd_node_cert.stat.exists or etcd_san_file.changed or etcd_ca_copy.changed
+
+- name: Set certificate permissions
+  ansible.builtin.file:
+    path: "{{ pg_etcd_pki_dir }}/{{ item.name }}"
+    owner: root
+    group: "{{ etcd_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {name: node.key, mode: "0640"}
+    - {name: node.crt, mode: "0644"}

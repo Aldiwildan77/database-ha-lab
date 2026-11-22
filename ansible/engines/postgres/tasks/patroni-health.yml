@@ -1,0 +1,63 @@
+---
+# patroni (from ha-health.yml): one leader, every other member streaming, nothing pending, every etcd member healthy.
+- name: List the Patroni cluster
+  ansible.builtin.command:
+    argv: ["{{ pg_patroni_ctl }}", list, "{{ pg_patroni_scope }}"]
+  register: health_patroni_list
+  become: true
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ (ansible_play_hosts_all | difference(lab_down) + ansible_play_hosts_all) | first }}"
+  run_once: true
+
+- name: Show the Patroni cluster
+  ansible.builtin.debug:
+    msg: "{{ health_patroni_list.stdout_lines | default([]) + (health_patroni_list.stderr_lines | default([])) }}"
+  run_once: true
+
+- name: Check etcd members
+  ansible.builtin.command:
+    argv: ["{{ pg_etcd_ctl }}", endpoint, health, --cluster, --write-out=json]
+  register: health_etcd
+  become: true
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ (ansible_play_hosts_all | difference(lab_down) + ansible_play_hosts_all) | first }}"
+  run_once: true
+
+- name: Check Patroni roles
+  ansible.builtin.assert:
+    that:
+      - lab_patroni | selectattr('role', 'equalto', 'primary') | selectattr('state', 'equalto', 'running') | list | length == 1
+      - lab_patroni | selectattr('role', 'equalto', 'replica') | selectattr('replication_state', 'equalto', 'streaming') | list | length == (ansible_play_hosts_all | length) - 1
+      - lab_patroni | selectattr('pending_restart') | list | length == 0
+      - lab_patroni | selectattr('paused') | list | length == 0
+      - hostvars[lab_writable[0]].lab_topo.status.patroni.role | default('') == 'primary'
+    fail_msg: >-
+      Unhealthy Patroni cluster: {{ dict(lab_topo_all | map(attribute='node') | zip(lab_patroni)) }}.
+      Writable: {{ lab_writable }}. Run halab-patronictl list on a node.
+    quiet: true
+  vars:
+    lab_patroni: "{{ lab_topo_all | map(attribute='status') | map(attribute='patroni', default={}) | list }}"
+  run_once: true
+
+- name: Check synchronous standbys (synchronous_mode)
+  ansible.builtin.assert:
+    that: hostvars[lab_writable[0]].lab_topo.status.sync_standbys | int >= pg_patroni.synchronous_node_count | default(1) | int
+    fail_msg: >-
+      {{ lab_writable[0] }} has {{ hostvars[lab_writable[0]].lab_topo.status.sync_standbys }} synchronous standbys
+      (synchronous_standby_names={{ hostvars[lab_writable[0]].lab_topo.status.synchronous_standby_names }}).
+    quiet: true
+  run_once: true
+  when: pg_patroni.synchronous_mode | default(false) | bool
+
+- name: Check etcd quorum
+  ansible.builtin.assert:
+    that:
+      - health_etcd.rc == 0
+      - (health_etcd.stdout | from_json) | selectattr('health') | list | length == ansible_play_hosts_all | length
+    fail_msg: >-
+      etcd is unhealthy; without a DCS quorum Patroni demotes the leader and the cluster is read-only.
+      {{ health_etcd.stdout | default('') }} {{ health_etcd.stderr | default('') }}
+    quiet: true
+  run_once: true

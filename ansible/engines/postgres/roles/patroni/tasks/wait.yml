@@ -1,0 +1,16 @@
+---
+- name: Wait for one running leader and every other member streaming
+  ansible.builtin.uri:
+    url: "https://{{ node_fqdn }}:{{ pg_patroni_rest_port }}/cluster"
+    ca_path: "{{ patroni_ca }}"
+    return_content: true
+  register: patroni_wait
+  until:
+    - patroni_wait.json is defined
+    - patroni_wait.json.members | default([]) | length == groups['db_nodes'] | length
+    - patroni_wait.json.members | selectattr('role', 'equalto', 'leader') | selectattr('state', 'equalto', 'running') | list | length == 1
+    - patroni_wait.json.members | rejectattr('role', 'equalto', 'leader') | selectattr('state', 'equalto', 'streaming') | list | length == (groups['db_nodes'] | length) - 1
+    - patroni_wait.json.members | selectattr('pending_restart', 'defined') | selectattr('pending_restart') | list | length == 0
+  retries: "{{ patroni_wait_retries }}"
+  delay: "{{ patroni_wait_delay }}"
+  run_once: true

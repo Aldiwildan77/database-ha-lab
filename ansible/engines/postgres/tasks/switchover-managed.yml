@@ -1,6 +1,66 @@
 ---
 # PostgreSQL hook for failover.yml (managed failover). Streaming and synchronous replication fail over manually
-# (failover-*.yml hooks); this runs only for strategies with an HA manager, and none is implemented yet.
-- name: Refuse a strategy with an HA manager
+# (failover-*.yml hooks); patroni switches over through its REST API, which returns once the new leader runs.
+- name: Refuse a strategy with an HA manager the lab does not drive
   ansible.builtin.fail:
-    msg: "{{ ha_provider }} is not implemented for PostgreSQL; only streaming-replication and sync-replication are."
+    msg: "{{ ha_provider }} is not implemented for PostgreSQL."
+  when: lab_ha_strategy.failover != 'patroni'
+
+- name: Patroni switchover
+  vars:
+    so_leader: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'lab_topo') | selectattr('db_up')
+         | selectattr('status.patroni.role', 'defined') | selectattr('status.patroni.role', 'equalto', 'primary')
+         | map(attribute='node') | first | default('') }}
+    so_candidate: "{{ new_primary | default('') }}"
+  run_once: true
+  block:
+    - name: Check the leader and the requested candidate
+      ansible.builtin.assert:
+        that:
+          - so_leader != ''
+          - so_candidate == '' or (so_candidate in groups['db_nodes'] and so_candidate != so_leader)
+        fail_msg: "Cannot switch over: leader={{ so_leader or 'none' }} requested={{ so_candidate or 'auto' }}."
+        quiet: true
+
+    # Without a candidate Patroni picks a healthy member (in synchronous_mode, a synchronous standby).
+    - name: Switch over to {{ so_candidate or 'the member Patroni picks' }}
+      ansible.builtin.uri:
+        url: "https://{{ hostvars[so_leader].node_fqdn }}:{{ pg_patroni_rest_port }}/switchover"
+        method: POST
+        ca_path: "{{ pg_etcd_pki_dir }}/ca.crt"
+        url_username: patroni
+        url_password: "{{ db_admin_password }}"
+        force_basic_auth: true
+        body_format: json
+        body: "{{ {'leader': so_leader} | combine({'candidate': so_candidate} if so_candidate else {}) }}"
+        return_content: true
+        timeout: 120
+        status_code: [200, 400, 412, 503]
+      register: so_result
+      become: true
+      delegate_to: "{{ so_leader }}"
+      changed_when: so_result.status == 200
+
+    - name: Explain a refused switchover
+      ansible.builtin.fail:
+        msg: >-
+          Patroni refused the switchover from {{ so_leader }} to {{ so_candidate or 'any member' }}
+          (HTTP {{ so_result.status }}: {{ so_result.content | default('') | trim }}). A candidate must be a healthy
+          streaming replica within maximum_lag_on_failover; with synchronous_mode it must be a synchronous standby.
+      when: so_result.status != 200
+
+    - name: Wait until the old leader streams from the new one
+      ansible.builtin.uri:
+        url: "https://{{ hostvars[so_leader].node_fqdn }}:{{ pg_patroni_rest_port }}/patroni"
+        ca_path: "{{ pg_etcd_pki_dir }}/ca.crt"
+        return_content: true
+      register: so_old
+      become: true
+      delegate_to: "{{ so_leader }}"
+      until:
+        - so_old.json is defined
+        - so_old.json.role | default('') == 'replica'
+        - so_old.json.replication_state | default('') == 'streaming'
+      retries: 40
+      delay: 3

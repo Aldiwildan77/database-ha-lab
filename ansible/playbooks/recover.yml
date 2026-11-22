@@ -9,7 +9,7 @@
     # A Galera node cannot start while no peer holds a primary component; the rejoin hook starts it.
     - name: Start the database service
       ansible.builtin.service:
-        name: "{{ lab_engine.service }}"
+        name: "{{ lab_db_service_unit }}"
         state: started
       when: lab_ha_strategy.family != 'galera'
 

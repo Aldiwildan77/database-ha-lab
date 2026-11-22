@@ -1,0 +1,52 @@
+{#- Managed by database-ha-lab. bootstrap.dcs applies once; later changes go through PATCH /config (the role does it). -#}
+{%- set patroni_config = {
+  'scope': pg_patroni_scope,
+  'namespace': '/halab/',
+  'name': inventory_hostname,
+  'log': {'level': 'INFO'},
+  'restapi': {
+    'listen': '0.0.0.0:' ~ pg_patroni_rest_port,
+    'connect_address': node_fqdn ~ ':' ~ pg_patroni_rest_port,
+    'certfile': patroni_cert,
+    'keyfile': patroni_key,
+    'cafile': patroni_ca,
+    'authentication': {'username': patroni_rest_user, 'password': db_admin_password},
+  },
+  'ctl': {'cacert': patroni_ca, 'certfile': patroni_cert, 'keyfile': patroni_key},
+  'etcd3': {
+    'hosts': groups['db_nodes'] | sort | map('extract', hostvars, 'node_fqdn') | map('regex_replace', '$', ':' ~ pg_etcd_client_port) | list,
+    'protocol': 'https',
+    'cacert': patroni_ca,
+    'cert': patroni_cert,
+    'key': patroni_key,
+  },
+  'bootstrap': {'dcs': patroni_dcs},
+  'postgresql': {
+    'listen': '*:' ~ pg_port,
+    'connect_address': node_fqdn ~ ':' ~ pg_port,
+    'data_dir': pg_data_dir,
+    'bin_dir': pg_bin_dir,
+    'custom_conf': pg_conf_dir ~ '/postgresql.conf',
+    'pgpass': pg_patroni_pgpass,
+    'use_unix_socket': true,
+    'use_unix_socket_repl': true,
+    'authentication': {
+      'superuser': {'username': 'postgres'},
+      'replication': {'username': pg_replication_user, 'password': db_replication_password, 'sslmode': patroni_ssl_mode},
+      'rewind': {'username': pg_rewind_user, 'password': db_admin_password, 'sslmode': patroni_ssl_mode},
+    },
+    'parameters': {
+      'unix_socket_directories': pg_socket_dir,
+      'hba_file': pg_conf_dir ~ '/pg_hba.conf',
+      'ident_file': pg_conf_dir ~ '/pg_ident.conf',
+    },
+    'create_replica_methods': ['basebackup'],
+    'basebackup': [{'checkpoint': 'fast'}],
+    'remove_data_directory_on_rewind_failure': false,
+    'remove_data_directory_on_diverged_timelines': false,
+  },
+  'watchdog': {'mode': 'off'},
+  'tags': {'nofailover': false, 'noloadbalance': false, 'clonefrom': false, 'nosync': false},
+} -%}
+# Managed by database-ha-lab. Do not edit; set patroni: options in config/ha.yml.
+{{ patroni_config | to_nice_yaml(indent=2, sort_keys=false) }}

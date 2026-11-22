@@ -8,7 +8,7 @@ COMPOSE   ?= docker compose -f local/compose/docker-compose.yml --env-file local
 VAULT_ARGS ?=
 ARGS      ?=
 
-HA_PROVIDERS := async-replication orchestrator semi-sync innodb-cluster percona-xtradb-cluster galera streaming-replication sync-replication
+HA_PROVIDERS := async-replication orchestrator semi-sync innodb-cluster percona-xtradb-cluster galera streaming-replication sync-replication patroni
 SCENARIOS    := baseline read-heavy write-heavy mixed-workload spike-test soak-test failover-test network-disruption
 CONFIG_FILES := inventory ha monitoring benchmark
 

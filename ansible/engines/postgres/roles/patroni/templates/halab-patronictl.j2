@@ -1,0 +1,3 @@
+#!/bin/sh
+# Managed by database-ha-lab: patronictl with the lab's Patroni configuration.
+exec /usr/bin/patronictl -c {{ pg_patroni_config }} "$@"
