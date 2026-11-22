@@ -1,32 +1,44 @@
 ---
 name: lab-node-check
-description: Check whether a VM or server can be a database-ha-lab node, and how many nodes each engine and HA strategy needs. Use when the user offers a machine (IP, hostname, UTM/Proxmox/cloud VM) for the lab, asks if a machine is suitable, or asks how many servers a scenario needs.
+description: How many VMs each database and test scenario needs (DB | scenario | HA strategy | VMs | arch), and whether a VM or server can be a database-ha-lab node. Use when the user offers a machine (IP, hostname, UTM/Proxmox/cloud VM) for the lab, asks if a machine is suitable, or asks how many servers a scenario needs.
 ---
 
 # Lab node check
 
 Two questions: **can this machine be a node**, and **are there enough nodes for the chosen scenario**. Probe read-only; never change a machine without the user's go-ahead. Machines may run other services: report conflicts, never stop or remove anything.
 
-## 1. Nodes per HA scenario
+## 1. VMs needed per scenario
 
-Source of truth: `ha.<strategy>.min_nodes` / `max_nodes` / `status` in `ansible/engines/<engine>/engine.yml`. Re-read it if this table looks stale.
+✅ ready · ❌ planned (refused by `make validate-config`). "VMs" = database nodes; JMeter, Prometheus and Grafana run on this machine. Min and max come from `ha.<strategy>` in `ansible/engines/<engine>/engine.yml`; re-read it if this looks stale.
 
-| Engine | Strategy | Status | Min | Recommended | Max | Why the recommendation |
-|---|---|---|---|---|---|---|
-| MySQL | `async-replication` | ready | 2 | 3 | – | With 2, a failover leaves no replica |
-| MySQL | `semi-sync` | ready | 2 | 3 | – | With 2, losing the replica makes every commit wait `timeout_ms`, then fall back to async |
-| MySQL | `orchestrator` | ready | 3 | 3 or 5 (odd) | – | Orchestrator raft needs a majority |
-| MySQL | `innodb-cluster` | ready | 3 | 3 or 5 (odd) | 9 | Group Replication quorum; 9 is the GR limit |
-| MySQL | `percona-xtradb-cluster` | ready | 3 | 3 or 5 (odd) | – | Galera quorum; an even split blocks writes |
-| MariaDB | `async-replication` | ready | 2 | 3 | – | As MySQL async |
-| MariaDB | `semi-sync` | ready | 2 | 3 | – | As MySQL semi-sync |
-| MariaDB | `galera` | planned (refused) | 3 | – | – | – |
-| MariaDB | `maxscale` | planned (refused) | 3 | – | – | – |
-| PostgreSQL | `streaming-replication` | ready | 2 | 3 | – | With 2, a failover leaves no standby |
-| PostgreSQL | `sync-replication` | ready | 2 | 3 | – | With 2 and `num_sync: 1`, losing the standby blocks all commits |
-| PostgreSQL | `patroni` | planned (refused) | 3 | – | – | – |
+| DB | Scenario | HA strategy | VMs needed | Arch | Notes |
+|---|---|---|---|---|---|
+| MySQL | Load benchmark (`baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`) | none, direct to one node | 1 ✅ | x86_64 | `ENDPOINT=<node>`; no HA in the path |
+| MySQL | Load benchmark through the HA endpoint | any ready strategy | strategy minimum ✅ | x86_64 | `ENDPOINT=ha` |
+| MySQL | Switchover (`make switchover`) | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64 | No data loss expected |
+| MySQL | Failover, manual promote (`failover-test`, `stop-db` / `kill-db`, `make promote`) | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64 | With 2, no replica is left after failover; semi-sync then waits `timeout_ms` per commit |
+| MySQL | Failover, automatic | `orchestrator` | 3 ✅ (odd) | x86_64 | Raft majority |
+| MySQL | Failover, automatic | `innodb-cluster` | 3 ✅, max 9 (odd) | x86_64 | Group Replication quorum; Router on every node |
+| MySQL | Failover, multi-primary | `percona-xtradb-cluster` | 3 ✅ (odd) | x86_64 | Galera quorum; failover/recover not yet verified |
+| MySQL | Recover old primary (`make recover`) | any ready strategy | same as failover ✅ | x86_64 | Errant GTIDs stop it |
+| MySQL | Network disruption (`network-disruption`, `isolate`, `netem`) | replication strategies | 2 ✅, 3 recommended | x86_64 | |
+| MySQL | Quorum loss / split brain (`isolate` on a cluster node) | `orchestrator`, `innodb-cluster`, `percona-xtradb-cluster` | 3 ✅; 5 to survive 2 failures | x86_64 | Minority side must stop accepting writes |
+| MariaDB | Load benchmark, direct | none | 1 ✅ | x86_64, aarch64 | |
+| MariaDB | Switchover | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64, aarch64 | |
+| MariaDB | Failover, manual promote | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64, aarch64 | semi-sync waits for exactly 1 replica |
+| MariaDB | Recover old primary | `async-replication`, `semi-sync` | 2 ✅ | x86_64, aarch64 | Errant GTID domains stop it |
+| MariaDB | Network disruption | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64, aarch64 | |
+| MariaDB | Failover, multi-primary | `galera` | 3 ❌ | – | planned |
+| MariaDB | Failover, automatic via proxy | `maxscale` | 3 ❌ | – | planned |
+| PostgreSQL | Load benchmark, direct | none | 1 ✅ | x86_64, aarch64 | |
+| PostgreSQL | Switchover | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | x86_64, aarch64 | Clean stop of the old primary, no data loss |
+| PostgreSQL | Failover, manual promote | `streaming-replication` | 2 ✅, 3 recommended | x86_64, aarch64 | Picks the highest replay LSN |
+| PostgreSQL | Failover, manual promote | `sync-replication` | 3 ✅ (2 works, but losing the standby blocks commits) | x86_64, aarch64 | Survives `nodes - 1 - num_sync` standby losses |
+| PostgreSQL | Recover old primary (pg_rewind) | `streaming-replication`, `sync-replication` | 2 ✅ | x86_64, aarch64 | Needs `db_admin_password`; else `postgres_rebuild=true` |
+| PostgreSQL | Network disruption | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | x86_64, aarch64 | |
+| PostgreSQL | Failover, automatic | `patroni` | 3 ❌ (+ etcd) | – | planned |
 
-One node can run provisioning, monitoring and direct benchmarks; `make ha` refuses below `min_nodes`. All nodes of a lab run the same engine and strategy.
+All nodes in a lab run one engine and one strategy. Switching needs `make destroy` (`DATA=1` when the server packages change).
 
 ## 2. Per-node requirements
 
