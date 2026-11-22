@@ -4,13 +4,12 @@ environment:
   name: lab
   network: tailnet          # default network for nodes that do not set one
 
-# One user and key on every node, so this block covers all of them. README.md "Node user" has the
-# one-time command that creates it on a node.
+# Same user and key on every node (README.md: Node user).
 ssh:
   user: db-ha-lab
   port: 22
   private_key: ~/.ssh/db-ha-lab_ed25519   # omit to use ssh-agent / Tailscale SSH
-  # become_password_env: LAB_BECOME_PASSWORD   # only without passwordless sudo: sudo password from this env var
+  # become_password_env: LAB_BECOME_PASSWORD
 
 # Networks the nodes are reachable on. Types:
 #   tailscale - interface tailscale0, Tailscale ranges; Tailscale must run on node and this machine
@@ -45,4 +44,4 @@ nodes:
     datacenter: dc-03
     # network: dc-lan
     # address: 10.20.0.13
-    # ssh: {user: root, port: 2222}   # override for a node where the shared user cannot be created
+    # ssh: {user: root}
