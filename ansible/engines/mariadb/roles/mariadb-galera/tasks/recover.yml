@@ -3,6 +3,8 @@
 #   a primary component exists:          start (or restart) `node`, it rejoins through IST or SST
 #   nodes run, none in a primary component (quorum lost): re-form it on the most advanced running node
 #   every node is down:                  bootstrap the node with the highest committed seqno, start the others
+#                                        (nodes that never joined are ignored and rejoin through SST);
+#                                        -e mariadb_galera_bootstrap_node=<n> bootstraps <n> without consistency checks
 - name: Read wsrep state on every node
   ansible.mysql.mysql_query:
     login_unix_socket: "{{ galera_socket }}"
@@ -86,57 +88,97 @@
       failed_when: false
       ignore_unreachable: true
 
+    # An empty or all-zero uuid means the node never completed a join (e.g. an interrupted SST): it holds no
+    # cluster state and rejoins through SST.
+    - name: Parse saved state
+      ansible.builtin.set_fact:
+        galera_rc_saved: >-
+          {%- set out = [] -%}
+          {%- for r in galera_rc_grastate.results if r.content is defined -%}
+          {%- set g = r.content | b64decode -%}
+          {%- set uuid = g | regex_findall('uuid:\s*(\S+)') | first | default('') -%}
+          {%- set _ = out.append({'node': r.item, 'uuid': uuid,
+                'seqno': (g | regex_findall('seqno:\s*(-?\d+)') | first | default('-1')) | int,
+                'safe': (g | regex_findall('safe_to_bootstrap:\s*(\d)') | first | default('0')) | int,
+                'blank': uuid is match('^(00000000-0000-0000-0000-000000000000)?$')}) -%}
+          {%- endfor -%}
+          {{ out }}
+
     # seqno -1 means the node did not shut down cleanly; galera_recovery reads the position from InnoDB.
     - name: Recover the committed position of nodes that stopped uncleanly
       ansible.builtin.command: galera_recovery
-      delegate_to: "{{ item.item }}"
-      loop: "{{ galera_rc_grastate.results | selectattr('content', 'defined') | list }}"
+      delegate_to: "{{ item.node }}"
+      loop: "{{ galera_rc_saved }}"
       loop_control:
-        label: "{{ item.item }}"
+        label: "{{ item.node }}"
       register: galera_rc_recovered
       changed_when: false
-      when: (item.content | b64decode) is search('seqno:\s*-1')
+      when: item.seqno == -1 and (not item.blank or item.node == mariadb_galera_bootstrap_node)
 
     # galera_recovery prints --wsrep_start_position=<uuid>:<seqno>[,<gtid>].
     - name: Collect the position of every node
       ansible.builtin.set_fact:
         galera_rc_positions: >-
           {%- set out = [] -%}
-          {%- for r in galera_rc_grastate.results if r.content is defined -%}
-          {%- set g = r.content | b64decode -%}
-          {%- set rec = galera_rc_recovered.results | selectattr('item.item', 'equalto', r.item) | selectattr('stdout', 'defined') | list -%}
+          {%- for s in galera_rc_saved -%}
+          {%- set rec = galera_rc_recovered.results | selectattr('item.node', 'equalto', s.node) | selectattr('stdout', 'defined') | list -%}
           {%- set pos = (rec[0].stdout | regex_findall('--wsrep_start_position=([^,\s]+)') | first | default('')) if rec else '' -%}
-          {%- set _ = out.append({'node': r.item,
-                'uuid': pos.split(':')[0] if pos else g | regex_findall('uuid:\s*(\S+)') | first | default(''),
-                'seqno': (pos.split(':')[1] if pos else g | regex_findall('seqno:\s*(-?\d+)') | first | default('-1')) | int,
-                'safe': (g | regex_findall('safe_to_bootstrap:\s*(\d)') | first | default('0')) | int,
-                'primary': 1 if r.item == galera_bootstrap_node else 0}) -%}
+          {%- set uuid = pos.split(':')[0] if pos else s.uuid -%}
+          {%- set _ = out.append({'node': s.node, 'uuid': uuid,
+                'seqno': (pos.split(':')[1] | int) if pos else s.seqno, 'safe': s.safe,
+                'blank': uuid is match('^(00000000-0000-0000-0000-000000000000)?$'),
+                'primary': 1 if s.node == galera_bootstrap_node else 0}) -%}
           {%- endfor -%}
           {{ out }}
+        galera_rc_unread: "{{ groups['db_nodes'] | difference(galera_rc_saved | map(attribute='node')) }}"
 
-    - name: Require every position, one cluster and a known bootstrap node
+    - name: Require every position and one cluster
       ansible.builtin.assert:
         that:
-          - mariadb_galera_bootstrap_node | length > 0 or galera_rc_positions | length == groups['db_nodes'] | length
-          - galera_rc_positions | map(attribute='uuid') | unique | list | length == 1
-          - galera_rc_positions | map(attribute='seqno') | max >= 0
-          - mariadb_galera_bootstrap_node | length == 0 or mariadb_galera_bootstrap_node in (galera_rc_positions | map(attribute='node'))
+          - galera_rc_unread | length == 0
+          - galera_rc_positions | rejectattr('blank') | list | length > 0
+          - galera_rc_positions | rejectattr('blank') | map(attribute='uuid') | unique | list | length == 1
+          - galera_rc_positions | rejectattr('blank') | map(attribute='seqno') | max >= 0
         fail_msg: >-
-          Cannot choose a bootstrap node safely. Positions read: {{ galera_rc_positions }}
-          (expected one per node in {{ groups['db_nodes'] }}, all with the same cluster uuid and a seqno >= 0).
-          A node that cannot be read may hold newer commits. To start anyway, pass
+          Cannot choose a bootstrap node safely. Positions read: {{ galera_rc_positions }}; unreadable:
+          {{ galera_rc_unread }}. Expected every node read, and every node that joined a cluster with the same
+          cluster uuid and a seqno >= 0. A node that cannot be read may hold newer commits. To start anyway, pass
           -e mariadb_galera_bootstrap_node=<node>; commits only on other nodes are then lost.
         quiet: true
+      when: mariadb_galera_bootstrap_node | length == 0
+
+    - name: Require a readable bootstrap node
+      ansible.builtin.assert:
+        that: mariadb_galera_bootstrap_node in (galera_rc_positions | map(attribute='node'))
+        fail_msg: >-
+          mariadb_galera_bootstrap_node={{ mariadb_galera_bootstrap_node }}: its grastate.dat could not be read.
+          Readable nodes: {{ galera_rc_positions | map(attribute='node') | list }}.
+        quiet: true
+      when: mariadb_galera_bootstrap_node | length > 0
 
     - name: Choose the bootstrap node
       ansible.builtin.set_fact:
         galera_rc_source: >-
           {{ mariadb_galera_bootstrap_node if mariadb_galera_bootstrap_node
-             else (galera_rc_positions | sort(attribute='seqno,safe,primary', reverse=true) | first).node }}
+             else (galera_rc_positions | rejectattr('blank') | sort(attribute='seqno,safe,primary', reverse=true) | first).node }}
+
+    - name: Warn that the override skips the consistency checks
+      ansible.builtin.debug:
+        msg:
+          - "WARNING: bootstrapping {{ galera_rc_source }} because mariadb_galera_bootstrap_node is set; uuid and seqno are not checked."
+          - "Every other node rejoins from it; commits it does not hold are lost (an SST replaces nodes of another cluster uuid)."
+          - "Positions (uuid:seqno): {{ galera_rc_positions | map(attribute='node') | zip(galera_rc_positions | map(attribute='uuid'),
+              galera_rc_positions | map(attribute='seqno')) | map('join', ':') | list }}"
+          - "Unreadable: {{ galera_rc_unread }}"
+      when: mariadb_galera_bootstrap_node | length > 0
 
     - name: Show the choice
       ansible.builtin.debug:
-        msg: "Bootstrapping {{ galera_rc_source }} (positions: {{ galera_rc_positions | map(attribute='node') | zip(galera_rc_positions | map(attribute='seqno')) | list }})"
+        msg: >-
+          Bootstrapping {{ galera_rc_source }} (positions: {{ galera_rc_positions | map(attribute='node')
+          | zip(galera_rc_positions | map(attribute='seqno')) | list }}; never joined, rejoin through SST:
+          {{ galera_rc_positions | selectattr('blank') | map(attribute='node') | list }})
+      when: mariadb_galera_bootstrap_node | length == 0
 
     - name: Mark the bootstrap node safe to bootstrap
       ansible.builtin.lineinfile:

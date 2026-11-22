@@ -7,17 +7,6 @@
   delegate_to: "{{ galera_target }}"
 
 - name: Wait until the node is Synced {{ galera_target }}
-  ansible.mysql.mysql_query:
-    login_unix_socket: "{{ galera_socket }}"
-    query: SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_local_state_comment', 'wsrep_cluster_status')
-  register: galera_target_sync
-  delegate_to: "{{ galera_target }}"
-  changed_when: false
-  failed_when: false
+  ansible.builtin.include_tasks: wait-synced.yml
   vars:
-    galera_target_status: "{{ galera_target_sync.query_result[0] | default([]) | items2dict(key_name='Variable_name', value_name='Value') }}"
-  until: >-
-    galera_target_status.wsrep_local_state_comment | default('') == 'Synced'
-    and galera_target_status.wsrep_cluster_status | default('') == 'Primary'
-  retries: "{{ galera_sync_retries }}"
-  delay: "{{ galera_sync_delay }}"
+    galera_wait_node: "{{ galera_target }}"

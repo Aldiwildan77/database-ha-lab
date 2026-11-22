@@ -180,6 +180,8 @@
 
 - name: Wait until every node is Synced
   ansible.builtin.include_tasks: wait-synced.yml
+  vars:
+    galera_wait_size: "{{ groups['db_nodes'] | length }}"
 
 - name: Start MariaDB at boot
   ansible.builtin.service:
