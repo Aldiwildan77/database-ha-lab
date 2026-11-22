@@ -75,7 +75,7 @@ flowchart TB
   P3 & P4 & P5 & P6 -->|"include_tasks lab_engine_tasks/&lt;hook&gt;.yml"| HOOKS
 
   subgraph ENG["ansible/engines/&lt;engine&gt;/"]
-    ROLES["roles/<br/>mysql, replication, orchestrator, innodb-cluster, percona-xtradb-cluster<br/>mariadb, mariadb-replication<br/>postgres, postgres-replication, postgres-exporter"]
+    ROLES["roles/<br/>mysql, replication, orchestrator, innodb-cluster, percona-xtradb-cluster<br/>mariadb, mariadb-replication, mariadb-galera<br/>postgres, postgres-replication, postgres-exporter, etcd, patroni"]
     HOOKS["tasks/ hooks<br/>topology-facts, ha-health,<br/>failover-choose / promote / unfence / repoint,<br/>switchover-managed, recover-rejoin,<br/>destroy-teardown / purge, mesh-login,<br/>ledger-dump, node-summary, server-version"]
   end
 
@@ -108,7 +108,7 @@ flowchart LR
 
 ## 4. Manual failover (async-replication, semi-sync, streaming, sync)
 
-`failover.yml -e failover_mode=switchover|failover`. Strategies with an HA manager (Orchestrator, InnoDB Cluster, Galera) go to `switchover-managed` instead.
+`failover.yml -e failover_mode=switchover|failover`. Strategies with an HA manager or multi-primary (Orchestrator, InnoDB Cluster, PXC, Galera, Patroni) go to `switchover-managed` instead.
 
 ```mermaid
 %%{init: {'theme': 'neutral'}}%%
