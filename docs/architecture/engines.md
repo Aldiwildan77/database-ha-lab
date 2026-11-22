@@ -1,6 +1,6 @@
 # Database engines and HA strategies
 
-The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication` and `semi-sync`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `galera` and `maxscale` and PostgreSQL's `patroni` are planned. The runbook for each engine and strategy is in [ha/README.md](../../ha/README.md).
+The lab core is engine-neutral. Everything specific to one database lives in that engine's folder, in its JMeter dialect and in its metrics collector. MySQL is ready. MariaDB is ready for `async-replication`, `semi-sync` and `galera`, and PostgreSQL for `streaming-replication` and `sync-replication`. MariaDB's `maxscale` and PostgreSQL's `patroni` are planned. The runbook for each engine and strategy is in [ha/README.md](../../ha/README.md).
 
 ## Layout
 
@@ -12,9 +12,9 @@ ansible/
       roles/               mysql, mysql-exporter, replication, orchestrator, innodb-cluster,
                            percona-xtradb-cluster, percona-repo
       tasks/               hooks called by the core playbooks (see "Engine hooks")
-    mariadb/               ready (async-replication, semi-sync)
-      engine.yml           descriptor; galera and maxscale are status: planned
-      roles/               mariadb, mariadb-replication (reuses mysql-exporter)
+    mariadb/               ready (async-replication, semi-sync, galera)
+      engine.yml           descriptor; maxscale is status: planned
+      roles/               mariadb, mariadb-replication, mariadb-galera (reuse mysql-exporter)
       tasks/               hooks
     postgres/              ready (streaming-replication, sync-replication)
       engine.yml           descriptor; patroni is status: planned
@@ -121,6 +121,17 @@ How it differs from MySQL:
 - Promotion safety: the hook waits until each candidate's `gtid_current_pos` reaches the old primary's (or the last position the replica received), then picks a candidate that is at or ahead of every other candidate in every domain. When none is, it refuses. `MASTER_GTID_WAIT` is not used: it follows `gtid_slave_pos`, which stays behind on a node that was primary earlier.
 - The shared `mysql-exporter` role is reused. `ansible.mysql` 5.x warns that its MariaDB support ends in 6.0.0; `requirements.yml` pins 5.2.1.
 
+Galera (`ha_provider: galera`, role `mariadb-galera`, runbook [ha/mariadb/galera](../../ha/mariadb/galera/README.md)):
+
+- Provisioning is the same as for the replication strategies (standalone `mariadb` role). `make ha` installs `galera-4`, `mariadb-backup` and `socat`, writes `/etc/mysql/mariadb.conf.d/zz-ha-lab-galera.cnf`, bootstraps the role-primary node with `galera_new_cluster` when no node holds a primary component, and starts the others one at a time (SST with `mariabackup`). Unlike PXC, the packages do not change, so the cluster is formed by `make ha`, not by provisioning.
+- A joiner's tables outside the system schemas would be replaced by the SST; the role refuses unless `-e mariadb_galera_rebuild_joiner=true`. When every node is down but `grastate.dat` shows the cluster ran before, `make ha` refuses and points to `make recover`.
+- On private networks the role shares one self-signed certificate (`/etc/mysql/halab-galera-tls`) and turns on `socket.ssl` for group communication and IST, and `encrypt=4` (`VERIFY_CA`) for SST.
+- `wsrep_gtid_mode=ON` with one `wsrep_gtid_domain_id`. Galera GTIDs keep the origin's `server_id`, so `gtid_current_pos` stays empty on the other nodes; the topology, ledger and collector read `gtid_binlog_pos` instead.
+- `topology-facts` reports a node outside the primary component (`wsrep_ready=OFF`) as read-only. `ha-health` requires every node `Synced` in one primary component and says whether a degraded cluster still has quorum.
+- `failover.yml` has nothing to promote: the switchover hook only reports that every node is writable.
+- `recover-rejoin` (run on `node`, acts on peers): with a primary component, it (re)starts `node`, which rejoins through IST or SST; when nodes run but none is primary (quorum lost), it sets `pc.bootstrap` on the running node with the highest `wsrep_last_committed` and starts the rest; when every node is down, it reads `grastate.dat` (and runs `galera_recovery` where `seqno` is -1), bootstraps the highest seqno and starts the others. `recover.yml` does not start a Galera node itself (for PXC the MySQL hook starts it). `-e mariadb_galera_bootstrap_node=<n>` overrides the choice when a node cannot be read.
+- `destroy-teardown` dissolves the cluster in place: every node keeps its data and restarts standalone.
+
 ## PostgreSQL
 
 PostgreSQL 16, 17 (default) or 18 from the PGDG apt repository (`apt.postgresql.org`), pinned so only `postgresql*` packages come from it. The lab owns a cluster named `halab` (`pg_createcluster 17 halab --port 15432`, `/etc/postgresql/17/halab`) and never touches other clusters: it refuses a `halab` cluster it did not create (`-e postgres_adopt_existing=true` overrides), and `make destroy DATA=1` drops only `halab` and purges the packages only when no other cluster remains. The package's default `main` cluster is suppressed while the server package is installed.
@@ -157,7 +168,6 @@ Verified in containers (Debian trixie, PostgreSQL 17, Docker connection plugin, 
 
 | Engine | Strategies | Failover |
 |---|---|---|
-| MariaDB | galera | built in (Galera) |
 | MariaDB | maxscale | MaxScale |
 | PostgreSQL | patroni (etcd) | Patroni |
 

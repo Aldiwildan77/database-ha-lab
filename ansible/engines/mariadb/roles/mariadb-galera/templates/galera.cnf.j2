@@ -1,0 +1,12 @@
+# Managed by mysql-ha-lab (Ansible). Local edits are overwritten.
+[mariadbd]
+{% for key, value in galera_wsrep_config | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}
+{% if galera_sst_config %}
+
+[sst]
+{% for key, value in galera_sst_config | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}
+{% endif %}

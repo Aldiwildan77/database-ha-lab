@@ -1,0 +1,54 @@
+---
+galera_cfg: "{{ lab_ha.mariadb_galera | default({}) }}"
+galera_cluster_name: "{{ galera_cfg.cluster_name | default('halab-galera') }}"
+galera_sst_method: "{{ galera_cfg.sst_method | default('mariabackup') }}"
+# Forced on when any node uses an unencrypted (private) network.
+galera_encrypt: "{{ galera_cfg.encrypt_cluster_traffic | default(lab_unencrypted_networks | length > 0) }}"
+galera_bootstrap_node: "{{ groups['role_primary'][0] }}"
+galera_gcomm_port: "{{ lab_ports.galera_gcomm }}"
+galera_ist_port: "{{ lab_ports.galera_ist }}"
+galera_sst_port: "{{ lab_ports.galera_sst }}"
+galera_node_address: "{{ node_address }}"
+
+galera_socket: /run/mysqld/mysqld.sock
+galera_datadir: /var/lib/mysql
+galera_config_file: /etc/mysql/mariadb.conf.d/zz-ha-lab-galera.cnf
+galera_tls_dir: /etc/mysql/halab-galera-tls
+galera_provider: /usr/lib/galera/libgalera_smm.so
+galera_packages: "{{ ['galera-4', 'socat'] + (['mariadb-backup'] if galera_sst_method == 'mariabackup' else ['rsync']) }}"
+
+# Set true to let a joiner's own tables be replaced by the SST copy of the cluster.
+mariadb_galera_rebuild_joiner: false
+# Full-cluster recovery: start from this node instead of the one with the highest committed seqno.
+mariadb_galera_bootstrap_node: ""
+
+galera_sync_retries: 120
+galera_sync_delay: 5
+
+galera_provider_options: >-
+  {{ ['gmcast.listen_addr=tcp://0.0.0.0:' ~ galera_gcomm_port, 'ist.recv_addr=' ~ galera_node_address ~ ':' ~ galera_ist_port]
+     + (['socket.ssl_cert=' ~ galera_tls_dir ~ '/cert.pem', 'socket.ssl_key=' ~ galera_tls_dir ~ '/key.pem',
+         'socket.ssl_ca=' ~ galera_tls_dir ~ '/cert.pem'] if galera_encrypt | bool else []) }}
+
+# SST over socat with TLS; both ends must present the cluster certificate (encrypt=4, VERIFY_CA).
+galera_sst_config: >-
+  {{ {'encrypt': 4, 'ssl-mode': 'VERIFY_CA', 'tca': galera_tls_dir ~ '/cert.pem', 'tcert': galera_tls_dir ~ '/cert.pem',
+      'tkey': galera_tls_dir ~ '/key.pem'} if galera_encrypt | bool else {} }}
+
+galera_wsrep_config:
+  wsrep_on: "ON"
+  wsrep_provider: "{{ galera_provider }}"
+  wsrep_cluster_name: "{{ galera_cluster_name }}"
+  wsrep_cluster_address: >-
+    gcomm://{{ groups['db_nodes'] | map('extract', hostvars, 'node_address')
+               | map('regex_replace', '$', ':' ~ galera_gcomm_port) | join(',') }}
+  wsrep_node_name: "{{ inventory_hostname }}"
+  wsrep_node_address: "{{ galera_node_address }}:{{ galera_gcomm_port }}"
+  wsrep_provider_options: '"{{ galera_provider_options | join("; ") }}"'
+  wsrep_sst_method: "{{ galera_sst_method }}"
+  wsrep_sst_receive_address: "{{ galera_node_address }}:{{ galera_sst_port }}"
+  wsrep_gtid_mode: "ON"
+  wsrep_gtid_domain_id: "{{ galera_cfg.gtid_domain_id | default(1) }}"
+  binlog_format: ROW
+  default_storage_engine: InnoDB
+  innodb_autoinc_lock_mode: 2

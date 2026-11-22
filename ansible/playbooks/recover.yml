@@ -6,10 +6,12 @@
   gather_facts: false
   become: true
   tasks:
+    # A Galera node cannot start while no peer holds a primary component; the rejoin hook starts it.
     - name: Start the database service
       ansible.builtin.service:
         name: "{{ lab_engine.service }}"
         state: started
+      when: lab_ha_strategy.family != 'galera'
 
 - name: Rejoin
   hosts: db_nodes
@@ -33,7 +35,7 @@
       ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/recover-rejoin.yml"
       when:
         - inventory_hostname == node
-        - rc_primary != ''
+        - rc_primary != '' or lab_ha_strategy.family == 'galera'
 
 - name: Verify topology
   ansible.builtin.import_playbook: topology.yml

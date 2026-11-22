@@ -1,7 +1,7 @@
 ---
 # Database engine. Each engine is a descriptor in ansible/engines/<name>/engine.yml.
 #   mysql    ready:   async-replication | semi-sync | orchestrator | innodb-cluster | percona-xtradb-cluster
-#   mariadb  ready:   async-replication | semi-sync   (galera and maxscale are planned and refused)
+#   mariadb  ready:   async-replication | semi-sync | galera   (maxscale is planned and refused)
 #   postgres ready:   streaming-replication | sync-replication   (patroni is planned and refused)
 # A planned engine or strategy is refused at validate time until its roles exist.
 db_engine: mysql
@@ -75,6 +75,17 @@ percona_xtradb_cluster:
   gcomm_port: 14567              # standard 4567 (group communication)
   ist_port: 14568                # standard 4568
   sst_port: 14444                # standard 4444
+  # encrypt_cluster_traffic: defaults to false on tailscale/vpn networks, forced true on private networks
+
+# MariaDB galera: make provision installs standalone MariaDB; make ha bootstraps the node with role primary
+# and joins the others one at a time (each receives an SST copy of it).
+mariadb_galera:
+  cluster_name: halab-galera
+  sst_method: mariabackup        # mariabackup (non-blocking donor) | rsync (no TLS, refused on private networks)
+  gcomm_port: 14567              # standard 4567 (group communication)
+  ist_port: 14568                # standard 4568
+  sst_port: 14444                # standard 4444
+  # gtid_domain_id: 1            # wsrep_gtid_domain_id shared by every node
   # encrypt_cluster_traffic: defaults to false on tailscale/vpn networks, forced true on private networks
 
 benchmark:

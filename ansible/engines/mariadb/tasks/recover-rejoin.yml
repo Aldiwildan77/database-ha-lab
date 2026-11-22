@@ -9,3 +9,11 @@
     - lab_ha_strategy.family == 'replication'
     - inventory_hostname == node
     - rc_primary != ''
+
+- name: Rejoin the Galera cluster (bootstraps it when every node is down)
+  ansible.builtin.include_role:
+    name: mariadb-galera
+    tasks_from: recover
+  when:
+    - lab_ha_strategy.family == 'galera'
+    - inventory_hostname == node

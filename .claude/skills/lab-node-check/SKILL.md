@@ -28,7 +28,9 @@ Two questions: **can this machine be a node**, and **are there enough nodes for 
 | MariaDB | Failover, manual promote | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64, aarch64 | semi-sync waits for exactly 1 replica |
 | MariaDB | Recover old primary | `async-replication`, `semi-sync` | 2 ✅ | x86_64, aarch64 | Errant GTID domains stop it |
 | MariaDB | Network disruption | `async-replication`, `semi-sync` | 2 ✅, 3 recommended | x86_64, aarch64 | |
-| MariaDB | Failover, multi-primary | `galera` | 3 ❌ | – | planned |
+| MariaDB | Failover, multi-primary | `galera` | 3 ✅ (odd) | x86_64, aarch64 | Galera quorum; every node writable |
+| MariaDB | Recover node / full-cluster restart (`make recover`) | `galera` | 3 ✅ | x86_64, aarch64 | Rejoins via IST or SST; full outage bootstraps the highest seqno |
+| MariaDB | Quorum loss / split brain (`isolate` on a cluster node) | `galera` | 3 ✅; 5 to survive 2 failures | x86_64, aarch64 | Minority goes non-Primary and refuses queries |
 | MariaDB | Failover, automatic via proxy | `maxscale` | 3 ❌ | – | planned |
 | PostgreSQL | Load benchmark, direct | none | 1 ✅ | x86_64, aarch64 | |
 | PostgreSQL | Switchover | `streaming-replication`, `sync-replication` | 2 ✅, 3 recommended | x86_64, aarch64 | Clean stop of the old primary, no data loss |

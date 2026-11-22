@@ -1,5 +1,12 @@
 ---
-# MariaDB hook for failover.yml (managed failover). No MariaDB strategy with an HA manager is implemented yet.
+# MariaDB hook for failover.yml (managed failover). Galera is multi-primary: there is no primary to move.
+- name: Galera has nothing to switch over
+  ansible.builtin.debug:
+    msg: "{{ ha_provider }} is multi-primary: every Synced node in the primary component accepts writes. Nothing to switch over."
+  run_once: true
+  when: lab_ha_strategy.family == 'galera'
+
 - name: Refuse managed switchover
   ansible.builtin.fail:
     msg: "{{ ha_provider }} has no managed switchover for MariaDB yet."
+  when: lab_ha_strategy.family != 'galera'

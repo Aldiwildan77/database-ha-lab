@@ -1,0 +1,157 @@
+---
+# Brings `node` back into the cluster; runs on `node` and acts on peers through delegation.
+#   a primary component exists:          start (or restart) `node`, it rejoins through IST or SST
+#   nodes run, none in a primary component (quorum lost): re-form it on the most advanced running node
+#   every node is down:                  bootstrap the node with the highest committed seqno, start the others
+- name: Read wsrep state on every node
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ galera_socket }}"
+    query: >-
+      SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status', 'wsrep_local_state_comment',
+        'wsrep_last_committed', 'wsrep_cluster_state_uuid')
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['db_nodes'] }}"
+  register: galera_rc_state
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Summarise cluster state
+  ansible.builtin.set_fact:
+    galera_rc: >-
+      {%- set out = {} -%}
+      {%- for r in galera_rc_state.results -%}
+      {%- set _ = out.update({r.item: (r.query_result[0] | items2dict(key_name='Variable_name', value_name='Value'))
+                                       if r.query_result is defined else {}}) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Find running and primary nodes
+  ansible.builtin.set_fact:
+    galera_rc_running: "{{ galera_rc | dict2items | selectattr('value.wsrep_cluster_status', 'defined') | map(attribute='key') | list }}"
+    galera_rc_primary: >-
+      {{ galera_rc | dict2items | selectattr('value.wsrep_cluster_status', 'defined')
+         | selectattr('value.wsrep_cluster_status', 'equalto', 'Primary') | map(attribute='key') | list }}
+
+- name: Rejoin the running cluster
+  ansible.builtin.include_tasks: restart-node.yml
+  vars:
+    galera_target: "{{ node }}"
+  when: galera_rc_primary | length > 0 and node not in galera_rc_primary
+
+- name: Re-form the primary component after a quorum loss
+  when: galera_rc_primary | length == 0 and galera_rc_running | length > 0
+  block:
+    - name: Choose the most advanced running node
+      ansible.builtin.set_fact:
+        galera_rc_source: >-
+          {%- set best = {'node': '', 'seqno': -2} -%}
+          {%- for n in galera_rc_running if galera_rc[n].wsrep_last_committed | int > best.seqno -%}
+          {%- set _ = best.update({'node': n, 'seqno': galera_rc[n].wsrep_last_committed | int}) -%}
+          {%- endfor -%}
+          {{ best.node }}
+
+    # With the wsrep_provider plugin loaded, provider options are variables and wsrep_provider_options is read-only.
+    - name: Find how provider options are set
+      ansible.mysql.mysql_query:
+        login_unix_socket: "{{ galera_socket }}"
+        query: SHOW GLOBAL VARIABLES LIKE 'wsrep_provider_pc_bootstrap'
+      delegate_to: "{{ galera_rc_source | default(inventory_hostname) }}"
+      register: galera_rc_pc_var
+      changed_when: false
+
+    - name: Declare its component primary
+      ansible.mysql.mysql_query:
+        login_unix_socket: "{{ galera_socket }}"
+        query: >-
+          {{ 'SET GLOBAL wsrep_provider_pc_bootstrap = ON' if galera_rc_pc_var.query_result[0] | length
+             else "SET GLOBAL wsrep_provider_options = 'pc.bootstrap=YES'" }}
+      delegate_to: "{{ galera_rc_source | default(inventory_hostname) }}"
+
+    - name: Start the nodes that are down
+      ansible.builtin.include_tasks: restart-node.yml
+      loop: "{{ groups['db_nodes'] | difference(galera_rc_running) }}"
+      loop_control:
+        loop_var: galera_target
+
+- name: Bootstrap after a full-cluster outage
+  when: galera_rc_running | length == 0
+  block:
+    - name: Read saved Galera state
+      ansible.builtin.slurp:
+        src: "{{ galera_datadir }}/grastate.dat"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['db_nodes'] }}"
+      register: galera_rc_grastate
+      failed_when: false
+      ignore_unreachable: true
+
+    # seqno -1 means the node did not shut down cleanly; galera_recovery reads the position from InnoDB.
+    - name: Recover the committed position of nodes that stopped uncleanly
+      ansible.builtin.command: galera_recovery
+      delegate_to: "{{ item.item }}"
+      loop: "{{ galera_rc_grastate.results | selectattr('content', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      register: galera_rc_recovered
+      changed_when: false
+      when: (item.content | b64decode) is search('seqno:\s*-1')
+
+    # galera_recovery prints --wsrep_start_position=<uuid>:<seqno>[,<gtid>].
+    - name: Collect the position of every node
+      ansible.builtin.set_fact:
+        galera_rc_positions: >-
+          {%- set out = [] -%}
+          {%- for r in galera_rc_grastate.results if r.content is defined -%}
+          {%- set g = r.content | b64decode -%}
+          {%- set rec = galera_rc_recovered.results | selectattr('item.item', 'equalto', r.item) | selectattr('stdout', 'defined') | list -%}
+          {%- set pos = (rec[0].stdout | regex_findall('--wsrep_start_position=([^,\s]+)') | first | default('')) if rec else '' -%}
+          {%- set _ = out.append({'node': r.item,
+                'uuid': pos.split(':')[0] if pos else g | regex_findall('uuid:\s*(\S+)') | first | default(''),
+                'seqno': (pos.split(':')[1] if pos else g | regex_findall('seqno:\s*(-?\d+)') | first | default('-1')) | int,
+                'safe': (g | regex_findall('safe_to_bootstrap:\s*(\d)') | first | default('0')) | int,
+                'primary': 1 if r.item == galera_bootstrap_node else 0}) -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Require every position, one cluster and a known bootstrap node
+      ansible.builtin.assert:
+        that:
+          - mariadb_galera_bootstrap_node | length > 0 or galera_rc_positions | length == groups['db_nodes'] | length
+          - galera_rc_positions | map(attribute='uuid') | unique | list | length == 1
+          - galera_rc_positions | map(attribute='seqno') | max >= 0
+          - mariadb_galera_bootstrap_node | length == 0 or mariadb_galera_bootstrap_node in (galera_rc_positions | map(attribute='node'))
+        fail_msg: >-
+          Cannot choose a bootstrap node safely. Positions read: {{ galera_rc_positions }}
+          (expected one per node in {{ groups['db_nodes'] }}, all with the same cluster uuid and a seqno >= 0).
+          A node that cannot be read may hold newer commits. To start anyway, pass
+          -e mariadb_galera_bootstrap_node=<node>; commits only on other nodes are then lost.
+        quiet: true
+
+    - name: Choose the bootstrap node
+      ansible.builtin.set_fact:
+        galera_rc_source: >-
+          {{ mariadb_galera_bootstrap_node if mariadb_galera_bootstrap_node
+             else (galera_rc_positions | sort(attribute='seqno,safe,primary', reverse=true) | first).node }}
+
+    - name: Show the choice
+      ansible.builtin.debug:
+        msg: "Bootstrapping {{ galera_rc_source }} (positions: {{ galera_rc_positions | map(attribute='node') | zip(galera_rc_positions | map(attribute='seqno')) | list }})"
+
+    - name: Mark the bootstrap node safe to bootstrap
+      ansible.builtin.lineinfile:
+        path: "{{ galera_datadir }}/grastate.dat"
+        regexp: '^safe_to_bootstrap:'
+        line: "safe_to_bootstrap: 1"
+      delegate_to: "{{ galera_rc_source | default(inventory_hostname) }}"
+
+    - name: Start the bootstrap node as a new primary component
+      ansible.builtin.command: galera_new_cluster
+      delegate_to: "{{ galera_rc_source | default(inventory_hostname) }}"
+      changed_when: true
+
+    - name: Start the other nodes one at a time
+      ansible.builtin.include_tasks: restart-node.yml
+      loop: "{{ galera_rc_positions | map(attribute='node') | difference([galera_rc_source]) }}"
+      loop_control:
+        loop_var: galera_target
