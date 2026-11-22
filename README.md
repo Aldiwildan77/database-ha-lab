@@ -56,7 +56,7 @@ Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See
 
 **Node user**
 
-Use the same user and key on every node, so the global `ssh:` block in `config/inventory.yml` covers them all. Create the key once on this machine, then run the second command once per node, logged in as any sudo user there (it asks for that user's password once):
+Each node in `config/inventory.yml` has its own `ssh:` (`user`, `port`, `private_key`), so nodes can use different users. To use one lab user everywhere, create the key once on this machine, then run the second command once per node, logged in as any sudo user there (it asks for that user's password once):
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/db-ha-lab_ed25519
@@ -67,7 +67,7 @@ KEY="$(cat ~/.ssh/db-ha-lab_ed25519.pub)"
 ssh -t <existing-user>@<node> "sudo bash -c 'id db-ha-lab >/dev/null 2>&1 || adduser --disabled-password --gecos \"\" db-ha-lab; echo \"db-ha-lab ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/db-ha-lab; chmod 440 /etc/sudoers.d/db-ha-lab; install -d -m700 -o db-ha-lab -g db-ha-lab /home/db-ha-lab/.ssh; echo \"$KEY\" > /home/db-ha-lab/.ssh/authorized_keys; chown db-ha-lab: /home/db-ha-lab/.ssh/authorized_keys; chmod 600 /home/db-ha-lab/.ssh/authorized_keys'"
 ```
 
-`db-ha-lab` has no password (key login only) and passwordless sudo. For a node where you cannot create it, override per node: `ssh: {user: root}` under that node.
+`db-ha-lab` has no password (key login only) and passwordless sudo. A node can also use an existing user, or `root` where root key login is allowed.
 
 ## Quick start
 

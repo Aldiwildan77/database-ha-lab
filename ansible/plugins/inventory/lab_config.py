@@ -395,15 +395,11 @@ class InventoryModule(BaseInventoryPlugin):
             errors.append(f"inventory.yml: environment.network '{default_net}' is not defined in networks "
                           f"({sorted(networks)})")
 
-        ssh = inv.get("ssh")
-        if not isinstance(ssh, dict) or not ssh.get("user"):
-            errors.append("inventory.yml: ssh.user is required")
-        else:
-            key = ssh.get("private_key")
-            if key and not os.path.isfile(os.path.expanduser(key)):
-                errors.append(f"inventory.yml: ssh.private_key '{key}' does not exist on this machine")
-            if not isinstance(ssh.get("port", 22), int):
-                errors.append("inventory.yml: ssh.port must be an integer")
+        # Each node sets its own ssh; a top-level ssh block, if present, only fills keys a node leaves out.
+        ssh = inv.get("ssh") or {}
+        if not isinstance(ssh, dict):
+            errors.append("inventory.yml: ssh must be a mapping")
+            ssh = {}
 
         nodes = inv.get("nodes")
         if not isinstance(nodes, list) or not nodes:
@@ -477,7 +473,16 @@ class InventoryModule(BaseInventoryPlugin):
                 if node.get(key) is not None and not isinstance(node.get(key), dict):
                     errors.append(f"{where}: {key} overrides must be a mapping of server options")
             if node.get("ssh") is not None and not isinstance(node.get("ssh"), dict):
-                errors.append(f"{where}: ssh overrides must be a mapping")
+                errors.append(f"{where}: ssh must be a mapping")
+            else:
+                node_ssh = {**ssh, **(node.get("ssh") or {})}
+                if not node_ssh.get("user"):
+                    errors.append(f"{where}: ssh.user is required")
+                key = node_ssh.get("private_key")
+                if key and not os.path.isfile(os.path.expanduser(key)):
+                    errors.append(f"{where}: ssh.private_key '{key}' does not exist on this machine")
+                if not isinstance(node_ssh.get("port", 22), int):
+                    errors.append(f"{where}: ssh.port must be an integer")
 
         engine = engines.get(engine_name)
         provider = ha.get("ha_provider")

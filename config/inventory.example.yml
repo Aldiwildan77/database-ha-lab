@@ -4,13 +4,6 @@ environment:
   name: lab
   network: tailnet          # default network for nodes that do not set one
 
-# Same user and key on every node (README.md: Node user).
-ssh:
-  user: db-ha-lab
-  port: 22
-  private_key: ~/.ssh/db-ha-lab_ed25519   # omit to use ssh-agent / Tailscale SSH
-  # become_password_env: LAB_BECOME_PASSWORD
-
 # Networks the nodes are reachable on. Types:
 #   tailscale - interface tailscale0, Tailscale ranges; Tailscale must run on node and this machine
 #   vpn       - WireGuard/OpenVPN/IPsec you manage; treated as encrypted
@@ -26,22 +19,25 @@ networks:
 
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
 # address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
-# Optional per node: network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}), ssh overrides.
+# ssh: user (required), port, private_key (omit to use ssh-agent / Tailscale SSH), become_password_env.
+# Optional per node: network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}).
 nodes:
   - name: db-01
     address: db-01.example.ts.net
+    ssh: {user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}
     role: primary
     datacenter: dc-01
 
   - name: db-02
     address: db-02.example.ts.net
+    ssh: {user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}
     role: replica
     datacenter: dc-02
 
   - name: db-03
     address: db-03.example.ts.net
+    ssh: {user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}
     role: replica
     datacenter: dc-03
     # network: dc-lan
     # address: 10.20.0.13
-    # ssh: {user: root}
