@@ -23,5 +23,6 @@ __pycache__/
 !local/state/.gitkeep
 local/tools/
 
-# Local agent worktrees
-.claude/
+# Local agent state; project skills are shared
+.claude/*
+!.claude/skills/
