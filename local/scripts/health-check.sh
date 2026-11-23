@@ -37,10 +37,14 @@ import json, sys
 bad = 0
 for t in json.load(sys.stdin)["data"]["activeTargets"]:
     l = t["labels"]
+    job, node = l.get("job", ""), l.get("node", l.get("instance", ""))
     ok = t["health"] == "up"
+    if not ok and job == "benchmark":
+        # JMeter exposes metrics only while a benchmark runs.
+        print("  {:10} {:20} idle (no benchmark running)".format(job, node))
+        continue
     bad += not ok
     err = "" if ok else " " + t.get("lastError", "")
-    job, node = l.get("job", ""), l.get("node", l.get("instance", ""))
     print("  {:10} {:20} {}{}".format(job, node, t["health"], err))
 sys.exit(1 if bad else 0)
 ' <<<"$targets" || fail=1
