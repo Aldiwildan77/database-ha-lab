@@ -1,0 +1,23 @@
+---
+# Lab ports only, from lab sources, on lab interfaces. Rules carry the comment 'ha-lab' (destroy removes them).
+- name: Allow lab ports from permitted sources
+  community.general.ufw:
+    rule: allow
+    interface: "{{ item.2 }}"
+    direction: in
+    from_ip: "{{ item.0 }}"
+    to_port: "{{ item.1 | string }}"
+    proto: tcp
+    comment: ha-lab
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports, common_firewall_interfaces) | list }}"
+
+- name: Allow lab UDP ports from permitted sources
+  community.general.ufw:
+    rule: allow
+    interface: "{{ item.2 }}"
+    direction: in
+    from_ip: "{{ item.0 }}"
+    to_port: "{{ item.1 | string }}"
+    proto: udp
+    comment: ha-lab
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_udp_ports, common_firewall_interfaces) | list }}"

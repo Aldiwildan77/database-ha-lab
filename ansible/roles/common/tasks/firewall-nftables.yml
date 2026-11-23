@@ -1,16 +1,14 @@
 ---
 # Only the lab's own table is written; the host's ruleset is never flushed.
-- name: Warn when ufw is active
+- name: Read ufw status
   ansible.builtin.command: ufw status
   register: common_ufw_status
   changed_when: false
   failed_when: false
 
-- name: Report ufw coexistence
-  ansible.builtin.debug:
-    msg: >-
-      ufw is active on {{ inventory_hostname }}. The halab table only adds drops for lab ports; ufw's own
-      rules still apply, so make sure ufw also allows the lab ports or disable it.
+# ufw drops in its own table whatever halab accepts, so open the lab ports there too.
+- name: Allow lab ports in the active ufw
+  ansible.builtin.include_tasks: firewall-ufw-allow.yml
   when: "'Status: active' in common_ufw_status.stdout | default('')"
 
 - name: Create rules directory

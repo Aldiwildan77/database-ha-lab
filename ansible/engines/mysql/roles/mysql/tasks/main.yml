@@ -6,8 +6,8 @@
 
 - name: Oracle MySQL APT packages are amd64 only
   ansible.builtin.assert:
-    that: ansible_architecture == 'x86_64'
-    fail_msg: "{{ inventory_hostname }} is {{ ansible_architecture }}; repo.mysql.com publishes amd64 packages only."
+    that: ansible_facts['architecture'] == 'x86_64'
+    fail_msg: "{{ inventory_hostname }} is {{ ansible_facts['architecture'] }}; repo.mysql.com publishes amd64 packages only."
     quiet: true
 
 - name: Check for an existing MySQL datadir
@@ -35,8 +35,8 @@
   ansible.builtin.deb822_repository:
     name: mysql
     types: deb
-    uris: "http://repo.mysql.com/apt/{{ ansible_distribution | lower }}"
-    suites: "{{ ansible_distribution_release }}"
+    uris: "http://repo.mysql.com/apt/{{ ansible_facts['distribution'] | lower }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
     components:
       - "{{ mysql_repo_components[mysql_version] }}"
       - mysql-tools
@@ -73,7 +73,7 @@
     dest: "{{ mysql_marker_file }}"
     mode: "0644"
     force: false
-    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_facts['date_time'].iso8601 }}\n"
 
 - name: Install MySQL
   ansible.builtin.apt:

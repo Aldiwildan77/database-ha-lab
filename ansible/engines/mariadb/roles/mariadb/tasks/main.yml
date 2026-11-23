@@ -25,7 +25,7 @@
     name: mariadb
     types: deb
     uris: "{{ mariadb_repo_uri }}"
-    suites: "{{ ansible_distribution_release }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
     components: [main]
     signed_by: "{{ mariadb_repo_key_url }}"
   register: mariadb_repo
@@ -59,7 +59,7 @@
     dest: "{{ mariadb_marker_file }}"
     mode: "0644"
     force: false
-    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_facts['date_time'].iso8601 }}\n"
 
 - name: Install MariaDB
   ansible.builtin.apt:

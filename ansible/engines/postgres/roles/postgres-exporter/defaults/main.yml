@@ -3,7 +3,7 @@ postgres_exporter_version: "{{ ((lab_monitoring.exporters | default({})).postgre
 postgres_exporter_arch_map:
   x86_64: amd64
   aarch64: arm64
-postgres_exporter_arch: "{{ postgres_exporter_arch_map[ansible_architecture] }}"
+postgres_exporter_arch: "{{ postgres_exporter_arch_map[ansible_facts['architecture']] }}"
 postgres_exporter_release: "postgres_exporter-{{ postgres_exporter_version }}.linux-{{ postgres_exporter_arch }}"
 postgres_exporter_url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v{{ postgres_exporter_version }}"
 postgres_exporter_install_dir: /opt/{{ postgres_exporter_release }}

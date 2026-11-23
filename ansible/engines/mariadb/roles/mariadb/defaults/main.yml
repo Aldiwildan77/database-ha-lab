@@ -1,6 +1,6 @@
 ---
 mariadb_version: "{{ mysql_version }}"
-mariadb_repo_uri: "https://deb.mariadb.org/{{ mariadb_version }}/{{ ansible_distribution | lower }}"
+mariadb_repo_uri: "https://deb.mariadb.org/{{ mariadb_version }}/{{ ansible_facts['distribution'] | lower }}"
 mariadb_repo_key_url: https://mariadb.org/mariadb_release_signing_key.pgp
 mariadb_packages:
   - mariadb-server
@@ -16,7 +16,7 @@ mariadb_adopt_existing: false
 
 # Fraction of total RAM; lower it (e.g. 0.25) on servers shared with other services.
 mariadb_buffer_pool_ratio: "{{ (lab_engine_settings | default({})).buffer_pool_ratio | default(0.5) | float }}"
-mariadb_buffer_pool_mb: "{{ [128, (ansible_memtotal_mb * mariadb_buffer_pool_ratio) | int] | max }}"
+mariadb_buffer_pool_mb: "{{ [128, (ansible_facts['memtotal_mb'] * mariadb_buffer_pool_ratio) | int] | max }}"
 
 mariadb_base_config:
   server_id: "{{ node_server_id }}"

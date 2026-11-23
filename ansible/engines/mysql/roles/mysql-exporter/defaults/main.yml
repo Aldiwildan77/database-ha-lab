@@ -3,7 +3,7 @@ mysqld_exporter_version: "{{ ((lab_monitoring.exporters | default({})).mysqld_ex
 mysqld_exporter_arch_map:
   x86_64: amd64
   aarch64: arm64
-mysqld_exporter_arch: "{{ mysqld_exporter_arch_map[ansible_architecture] }}"
+mysqld_exporter_arch: "{{ mysqld_exporter_arch_map[ansible_facts['architecture']] }}"
 mysqld_exporter_release: "mysqld_exporter-{{ mysqld_exporter_version }}.linux-{{ mysqld_exporter_arch }}"
 mysqld_exporter_url: "https://github.com/prometheus/mysqld_exporter/releases/download/v{{ mysqld_exporter_version }}"
 mysqld_exporter_install_dir: /opt/{{ mysqld_exporter_release }}

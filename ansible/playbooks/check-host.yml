@@ -62,7 +62,7 @@
         host_planned_pool_mb: >-
           {{ ((lab_engine_settings | default({})).config | default({})).innodb_buffer_pool_size
              | default(mysql_node_config.innodb_buffer_pool_size | default(none), true)
-             | default(((ansible_memtotal_mb * buffer_ratio) | int) ~ 'M', true)
+             | default(((ansible_facts['memtotal_mb'] * buffer_ratio) | int) ~ 'M', true)
              | human_to_bytes(default_unit='B') // 1048576 }}
 
     - name: Build conflicts
@@ -85,7 +85,7 @@
         host_plan:
           node: "{{ inventory_hostname }}"
           already_lab_managed: "{{ host_lab_managed }}"
-          os: "{{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }}"
+          os: "{{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} {{ ansible_facts['architecture'] }}"
           memory_available_mb: "{{ host_memavail.stdout | int }}"
           buffer_pool_mb: "{{ host_planned_pool_mb if db_engine == 'mysql' else 'n/a' }}"
           apt_repository: "{{ lab_engine.apt_repository[ha_provider] | default(lab_engine.apt_repository.default) }}"

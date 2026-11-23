@@ -26,27 +26,8 @@
     comment: tailscale
   when: node_network_type == 'tailscale' or node_access_network_type | default('') == 'tailscale'
 
-- name: Allow lab ports from permitted sources
-  community.general.ufw:
-    rule: allow
-    interface: "{{ item.2 }}"
-    direction: in
-    from_ip: "{{ item.0 }}"
-    to_port: "{{ item.1 | string }}"
-    proto: tcp
-    comment: ha-lab
-  loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports, common_firewall_interfaces) | list }}"
-
-- name: Allow lab UDP ports from permitted sources
-  community.general.ufw:
-    rule: allow
-    interface: "{{ item.2 }}"
-    direction: in
-    from_ip: "{{ item.0 }}"
-    to_port: "{{ item.1 | string }}"
-    proto: udp
-    comment: ha-lab
-  loop: "{{ common_firewall_allowed_sources | product(common_firewall_udp_ports, common_firewall_interfaces) | list }}"
+- name: Allow lab ports
+  ansible.builtin.import_tasks: firewall-ufw-allow.yml
 
 - name: Enable firewall with default deny incoming
   community.general.ufw:

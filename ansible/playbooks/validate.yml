@@ -56,8 +56,8 @@
     - name: Summary
       ansible.builtin.debug:
         msg: >-
-          {{ inventory_hostname }} ok: {{ ansible_distribution }} {{ ansible_distribution_version }},
-          {{ ansible_processor_vcpus }} vCPU, {{ ansible_memtotal_mb }} MB RAM,
+          {{ inventory_hostname }} ok: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }},
+          {{ ansible_facts['processor_vcpus'] }} vCPU, {{ ansible_facts['memtotal_mb'] }} MB RAM,
           network {{ node_network }} ({{ node_network_type }}) {{ node_interface }} {{ node_ip }}, NTP synced={{ node_ntp.stdout | trim }}
 
 - name: Full-mesh connectivity (routing and firewall for the selected provider)

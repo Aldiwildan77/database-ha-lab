@@ -57,6 +57,18 @@
         enabled: false
       failed_when: false
 
+    - name: Remove lab ufw rules
+      ansible.builtin.shell: |
+        set -o pipefail
+        command -v ufw >/dev/null || exit 0
+        for n in $(ufw status numbered | grep -E '# ha-lab$' | sed -E 's/^\[ *([0-9]+)\].*/\1/' | sort -rn); do
+          ufw --force delete "$n" >/dev/null && echo "deleted $n"
+        done
+      args:
+        executable: /bin/bash
+      register: destroy_ufw
+      changed_when: destroy_ufw.stdout | length > 0
+
     - name: Delete lab firewall config and markers
       ansible.builtin.file:
         path: "{{ item }}"
