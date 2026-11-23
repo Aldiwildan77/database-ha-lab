@@ -1,0 +1,81 @@
+---
+# Replaces this node's data with a copy of replication_primary (CLONE plugin), discarding its errant transactions.
+# Used for an old primary that crashed with binlogged but unreplicated transactions.
+- name: Allow the clone plugin to be installed on the recipient
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SET GLOBAL super_read_only = OFF
+
+- name: Install the clone plugin (donor and recipient)
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: INSTALL PLUGIN clone SONAME 'mysql_clone.so'
+  delegate_to: "{{ item }}"
+  loop: ["{{ replication_primary }}", "{{ inventory_hostname }}"]
+  register: replication_clone_plugin
+  changed_when: not replication_clone_plugin.failed
+  failed_when: replication_clone_plugin.failed and 'already exists' not in (replication_clone_plugin.msg | default(''))
+
+- name: Read replication account hosts on the donor
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SELECT host FROM mysql.user WHERE user = %s
+    positional_args: ["{{ replication_user }}"]
+  delegate_to: "{{ replication_primary }}"
+  register: replication_clone_hosts
+
+- name: Let the replication account read the donor for cloning
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query:
+      - SET SESSION sql_log_bin = 0
+      - "GRANT BACKUP_ADMIN ON *.* TO '{{ replication_user }}'@'{{ item.host }}'"
+  delegate_to: "{{ replication_primary }}"
+  loop: "{{ replication_clone_hosts.query_result[0] }}"
+  loop_control:
+    label: "{{ item.host }}"
+
+- name: Clone from the primary (the server restarts itself afterwards)
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query:
+      - SET GLOBAL clone_valid_donor_list = '{{ hostvars[replication_primary].node_fqdn }}:{{ mysql_port }}'
+      - >-
+        CLONE INSTANCE FROM '{{ replication_user }}'@'{{ hostvars[replication_primary].node_fqdn }}':{{ mysql_port }}
+        IDENTIFIED BY '{{ mysql_replication_password }}' {{ 'REQUIRE SSL' if replication_ssl | bool else 'REQUIRE NO SSL' }}
+  register: replication_clone
+  changed_when: true
+  failed_when: >-
+    replication_clone.failed and not (replication_clone.msg | default('')
+    | regex_search('Lost connection|gone away|3707|Restart server', ignorecase=true))
+  no_log: true
+
+- name: Make sure the server runs on the cloned data
+  ansible.builtin.systemd_service:
+    name: mysql
+    state: restarted
+
+- name: Wait for the server
+  ansible.builtin.wait_for:
+    path: "{{ replication_socket }}"
+    timeout: 300
+
+- name: Check the clone completed
+  ansible.mysql.mysql_query:
+    login_unix_socket: "{{ replication_socket }}"
+    query: SELECT STATE, ERROR_NO, ERROR_MESSAGE FROM performance_schema.clone_status
+  register: replication_clone_status
+  retries: 20
+  delay: 3
+  until: replication_clone_status is succeeded
+  failed_when: replication_clone_status.query_result[0][0].STATE | default('') != 'Completed'
+
+- name: Reapply semi-synchronous settings on the cloned data
+  ansible.builtin.include_tasks: semi-sync.yml
+  when: replication_semi_sync | bool
+
+- name: Re-read replica status after the clone
+  ansible.mysql.mysql_replication:
+    login_unix_socket: "{{ replication_socket }}"
+    mode: getreplica
+  register: replication_status

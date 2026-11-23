@@ -5,4 +5,7 @@
     name: replication
   vars:
     replication_primary: "{{ fo_new_primary }}"
-  when: lab_topo.db_up
+  # After an unplanned failover the old primary may hold unreplicated transactions; make recover rejoins it.
+  when:
+    - lab_topo.db_up
+    - not (failover_mode == 'failover' and inventory_hostname == old_primary)

@@ -111,9 +111,9 @@ switchover: validate-config ## Planned primary change: make switchover [NEW_PRIM
 promote: validate-config ## Unplanned failover after primary loss: make promote [NEW_PRIMARY=<node>] [FORCE=1]
 	$(ansible) ansible/playbooks/failover.yml -e failover_mode=failover $(if $(NEW_PRIMARY),-e new_primary=$(NEW_PRIMARY)) $(if $(FORCE),-e force=true)
 
-recover: validate-config ## Bring a failed node back: make recover NODE=<node>
-	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node>"; exit 1; }
-	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE)
+recover: validate-config ## Bring a failed node back: make recover NODE=<node> [REBUILD=1 clones it from the primary]
+	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node> [REBUILD=1]"; exit 1; }
+	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE) $(if $(REBUILD),-e rebuild=true)
 
 fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem> [ACTION=restore] CONFIRM=yes
 	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }

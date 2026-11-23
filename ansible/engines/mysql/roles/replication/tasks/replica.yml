@@ -12,25 +12,33 @@
   register: replication_local_gtid
   when: not replication_in_place
 
-- name: Read primary GTID set
+- name: Find transactions the primary does not have
   ansible.mysql.mysql_query:
     login_unix_socket: "{{ replication_socket }}"
-    query: SELECT GTID_SUBSET(%s, @@GLOBAL.gtid_executed) AS subset
+    query: SELECT GTID_SUBTRACT(%s, @@GLOBAL.gtid_executed) AS errant
     positional_args:
       - "{{ replication_local_gtid.query_result[0][0].executed }}"
   delegate_to: "{{ replication_primary }}"
-  register: replication_subset
+  register: replication_errant
   when: not replication_in_place
 
 - name: Refuse replicas with errant transactions
   ansible.builtin.fail:
     msg: >-
       {{ inventory_hostname }} has transactions the primary does not have
-      ({{ replication_local_gtid.query_result[0][0].executed }}). Replicating would diverge.
-      Rebuild this node or remove the errant GTIDs deliberately.
+      ({{ replication_errant.query_result[0][0].errant }}). Replicating would diverge.
+      Rebuild it from the primary with make recover NODE={{ inventory_hostname }} REBUILD=1 (discards those transactions).
   when:
     - not replication_in_place
-    - replication_subset.query_result[0][0].subset | int != 1
+    - replication_errant.query_result[0][0].errant | length > 0
+    - not (rebuild | default(false) | bool)
+
+- name: Rebuild from the primary
+  ansible.builtin.include_tasks: clone.yml
+  when:
+    - not replication_in_place
+    - replication_errant.query_result[0][0].errant | length > 0
+    - rebuild | default(false) | bool
 
 - name: Make replica read-only
   ansible.mysql.mysql_variables:

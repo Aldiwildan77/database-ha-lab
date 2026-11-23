@@ -49,6 +49,9 @@ def log(msg):
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+ANSIBLE_LOG_DIR = None
+
+
 def ansible(playbook, extra: dict, check=True):
     cmd = ["ansible-playbook", os.path.join(ROOT, "ansible", "playbooks", playbook)]
     cmd += os.environ.get("VAULT_ARGS", "").split()
@@ -57,6 +60,10 @@ def ansible(playbook, extra: dict, check=True):
     env = {**os.environ, "ANSIBLE_CONFIG": os.path.join(ROOT, "ansible.cfg")}
     log("ansible-playbook " + playbook + " " + " ".join(f"{k}={v}" for k, v in extra.items() if k != "confirm"))
     p = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+    if ANSIBLE_LOG_DIR:
+        with open(os.path.join(ANSIBLE_LOG_DIR, "ansible.log"), "a") as fh:
+            fh.write(f"===== {playbook} {json.dumps({k: v for k, v in extra.items() if k != 'confirm'})} rc={p.returncode}\n"
+                     + p.stdout + p.stderr)
     if check and p.returncode != 0:
         sys.stderr.write(p.stdout[-4000:] + p.stderr[-2000:])
         raise SystemExit(f"{playbook} failed (rc={p.returncode})")
@@ -225,6 +232,8 @@ def main():
     run_id = new_run_id(results)
     run_dir = os.path.join(results, run_id)
     os.makedirs(os.path.join(run_dir, "ledger"))
+    global ANSIBLE_LOG_DIR
+    ANSIBLE_LOG_DIR = run_dir
     log(f"run_id {run_id} -> {os.path.relpath(run_dir, ROOT)}")
 
     ansible("benchmark-context.yml", {"out": run_dir, **({"endpoint_override": a.endpoint} if a.endpoint else {})})
@@ -347,7 +356,7 @@ def main():
             restored = True
             events.add("fault_restored", t_res, completed_at=iso(now()))
             if manual and promoted and fault in SERVER_FAULTS:
-                p = ansible("recover.yml", {"node": fault_node}, check=False)
+                p = ansible("recover.yml", {"node": fault_node, "rebuild": True}, check=False)
                 events.add("old_primary_rejoined" if p.returncode == 0 else "old_primary_rejoin_failed", now())
         jm.wait()
     finally:
