@@ -14,7 +14,7 @@ CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
-.PHONY: help init deps validate validate-local validate-config plan-host provision configure-exporters collect-info \
+.PHONY: help manual init deps validate validate-local validate-config plan-host provision configure-exporters collect-info \
         targets monitoring monitoring-stop monitoring-status metrics-check mesh-check network-check network-matrix \
         probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
         dashboards benchmark failover report status destroy lint
@@ -160,6 +160,9 @@ destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=
 	  printf "Type the environment name (%s) to confirm: " "$$env"; read -r answer; \
 	  [ -n "$$env" ] && [ "$$answer" = "$$env" ] || { echo "aborted"; exit 1; }; \
 	  $(ansible) ansible/playbooks/destroy-ha.yml -e confirm=$$env $(if $(DATA),-e destroy_data=true)
+
+manual: ## Rebuild the PDF manual (docs/manuals) with headless Chrome
+	docs/manuals/build.sh
 
 lint: ## ansible-lint, yamllint, shellcheck, compose config, python compile
 	ansible-lint ansible/

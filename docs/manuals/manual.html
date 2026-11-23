@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Database HA Lab - Operator Manual</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  :root { --ink:#1f2328; --muted:#57606a; --line:#d0d7de; --soft:#f6f8fa; --code:#eff1f3;
+          --warn-bg:#fff8e6; --warn-line:#d4a72c; --danger-bg:#fdecec; --danger-line:#cf222e;
+          --note-bg:#eef4fb; --note-line:#54aeff; --ok:#1a7f37; --no:#cf222e; }
+  body { font: 10.5pt/1.5 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); background:#fff; margin:0; }
+  h1 { font-size: 22pt; margin: 0 0 4pt; }
+  h2 { font-size: 15pt; border-bottom: 1px solid var(--line); padding-bottom: 3pt; margin: 22pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 12pt; margin: 14pt 0 5pt; break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 10pt 0 4pt; break-after: avoid; }
+  p, li { orphans: 3; widows: 3; }
+  code { font: 9pt/1.4 Menlo, Consolas, monospace; background: var(--code); padding: 0 3px; border-radius: 3px; }
+  pre { font: 8.6pt/1.45 Menlo, Consolas, monospace; background: var(--soft); border: 1px solid var(--line);
+        border-radius: 4px; padding: 7pt 9pt; white-space: pre-wrap; break-inside: avoid; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9pt; break-inside: auto; }
+  tr { break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 3pt 5pt; text-align: left; vertical-align: top; }
+  th { background: var(--soft); }
+  .ok { color: var(--ok); font-weight: 600; } .no { color: var(--no); font-weight: 600; }
+  .box { border-left: 4px solid; border-radius: 4px; padding: 6pt 10pt; margin: 8pt 0; break-inside: avoid; }
+  .box > :first-child { margin-top: 0; } .box > :last-child { margin-bottom: 0; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-line); }
+  .danger { background: var(--danger-bg); border-color: var(--danger-line); }
+  .note { background: var(--note-bg); border-color: var(--note-line); }
+  .box .t { font-weight: 700; display: block; margin-bottom: 2pt; }
+  .cover { height: 245mm; display: flex; flex-direction: column; justify-content: center; break-after: page; }
+  .cover .sub { color: var(--muted); font-size: 12pt; }
+  .toc ol { columns: 2; column-gap: 24pt; } .toc li { margin: 2pt 0; }
+  .chapter { break-before: page; }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <h1>Database HA Lab</h1>
+  <div class="sub">Operator manual: sizing, networks, setup, HA strategies, test scenarios and troubleshooting</div>
+  <p class="small">MySQL 8.4 / 8.0 · MariaDB 11.4 / 10.11 / 11.8 · PostgreSQL 17 / 16 / 18<br>
+  Source: <code>docs/manuals/manual.html</code> · rebuild with <code>make manual</code></p>
+</section>
+
+<section class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>What the lab is</li>
+    <li>Table check: nodes and sizing</li>
+    <li>Preparing the nodes</li>
+    <li>Networks</li>
+    <li>Configuration files</li>
+    <li>Lifecycle: from empty servers to a running topology</li>
+    <li>HA strategies</li>
+    <li>Test scenarios</li>
+    <li>Monitoring and reports</li>
+    <li>Ports</li>
+    <li>Safety guarantees</li>
+    <li>Troubleshooting: real cases</li>
+    <li>Command reference</li>
+  </ol>
+</section>
+
+<!-- 1 -->
+<section class="chapter">
+<h2>1. What the lab is</h2>
+<p>A research and benchmarking lab for database high availability. Ansible installs a database engine directly on your servers (no containers), builds one HA topology on top, and gives you commands to switch over, fail over, inject faults, recover and benchmark. Prometheus, Grafana and JMeter run on your own machine (the <b>operator machine</b>).</p>
+<table>
+  <tr><th>Part</th><th>Where it runs</th><th>What it does</th></tr>
+  <tr><td>Ansible playbooks + engine descriptors</td><td>operator machine</td><td>Provision, deploy HA, switchover, failover, recover, destroy</td></tr>
+  <tr><td>Database server (lab port)</td><td>every node</td><td>MySQL, MariaDB or PostgreSQL on a non-standard port</td></tr>
+  <tr><td>Exporters + lab collector</td><td>every node</td><td>node_exporter, engine exporter, HA collector</td></tr>
+  <tr><td>Prometheus + Grafana + probe</td><td>operator machine (Docker)</td><td>Metrics, eight dashboards, client-side latency probe</td></tr>
+  <tr><td>JMeter</td><td>operator machine</td><td>Load scenarios through the HA endpoint or one node</td></tr>
+</table>
+<p>One lab runs <b>one engine and one HA strategy</b> at a time, chosen in <code>config/ha.yml</code> (<code>db_engine</code>, <code>ha_provider</code>).</p>
+</section>
+
+<!-- 2 -->
+<section class="chapter">
+<h2>2. Table check: nodes and sizing</h2>
+<p>Spec format: <b>vCPU / RAM / disk</b> per node. ✅ = supported, ❌ = not available yet.</p>
+
+<h3>2.1 MySQL</h3>
+<table>
+<tr><th>Scenario</th><th>HA strategy</th><th>Nodes</th><th>Min spec</th><th>Recommended</th><th>Arch</th><th>Notes</th></tr>
+<tr><td>Load benchmark, direct</td><td>none</td><td>1 ✅</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td><code>ENDPOINT=&lt;node&gt;</code>; soak-test +20 GB disk</td></tr>
+<tr><td>Load benchmark via HA endpoint</td><td>any ready strategy</td><td>strategy min ✅</td><td colspan="2">as the strategy</td><td>x86_64</td><td><code>ENDPOINT=ha</code></td></tr>
+<tr><td>Switchover</td><td>async-replication, semi-sync</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td>No data loss expected</td></tr>
+<tr><td>Failover, manual promote</td><td>async-replication, semi-sync</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td>With 2 nodes, no replica is left after failover</td></tr>
+<tr><td>Failover, automatic</td><td>orchestrator</td><td>3 ✅ (odd)</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td>Raft majority</td></tr>
+<tr><td>Failover, automatic</td><td>innodb-cluster</td><td>3 ✅, max 9 (odd)</td><td>2 / 4 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td>Group Replication + Router on every node</td></tr>
+<tr><td>Failover, multi-primary</td><td>percona-xtradb-cluster</td><td>3 ✅ (odd)</td><td>2 / 4 GB / 30 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64</td><td>SST needs room for a second data copy</td></tr>
+<tr><td>Recover old primary</td><td>any ready strategy</td><td>as failover ✅</td><td colspan="2">as the strategy</td><td>x86_64</td><td>Errant GTIDs stop it</td></tr>
+<tr><td>Network disruption</td><td>any ready strategy</td><td>2 ✅ (clusters 3)</td><td colspan="2">as the strategy</td><td>x86_64</td><td></td></tr>
+<tr><td>Quorum loss / split brain</td><td>orchestrator, innodb-cluster, PXC</td><td>3 ✅; 5 to survive 2</td><td colspan="2">as the strategy</td><td>x86_64</td><td>Minority must stop accepting writes</td></tr>
+</table>
+
+<h3>2.2 MariaDB</h3>
+<table>
+<tr><th>Scenario</th><th>HA strategy</th><th>Nodes</th><th>Min spec</th><th>Recommended</th><th>Arch</th><th>Notes</th></tr>
+<tr><td>Load benchmark, direct</td><td>none</td><td>1 ✅</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td></td></tr>
+<tr><td>Switchover</td><td>async-replication, semi-sync</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td></td></tr>
+<tr><td>Failover, manual promote</td><td>async-replication, semi-sync</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>semi-sync waits for exactly 1 replica</td></tr>
+<tr><td>Recover old primary</td><td>async-replication, semi-sync</td><td>2 ✅</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Errant GTID domains stop it</td></tr>
+<tr><td>Network disruption</td><td>async-replication, semi-sync</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td></td></tr>
+<tr><td>Failover, multi-primary</td><td>galera</td><td>3 ✅ (odd)</td><td>2 / 4 GB / 30 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>No promotion; quorum loss blocks writes</td></tr>
+<tr><td>Quorum loss / full outage</td><td>galera</td><td>3 ✅; 5 to survive 2</td><td>2 / 4 GB / 30 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td><code>make recover</code> bootstraps from the highest seqno</td></tr>
+<tr><td>Failover via proxy</td><td>maxscale</td><td>3 ❌</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Planned, refused at validate time</td></tr>
+</table>
+
+<h3>2.3 PostgreSQL</h3>
+<table>
+<tr><th>Scenario</th><th>HA strategy</th><th>Nodes</th><th>Min spec</th><th>Recommended</th><th>Arch</th><th>Notes</th></tr>
+<tr><td>Load benchmark, direct</td><td>none</td><td>1 ✅</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td></td></tr>
+<tr><td>Switchover</td><td>streaming, sync-replication</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>No data loss expected</td></tr>
+<tr><td>Failover, manual promote</td><td>streaming-replication</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Picks the highest replay LSN</td></tr>
+<tr><td>Failover, manual promote</td><td>sync-replication</td><td>3 ✅ (2 works)</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>With 2, losing the standby blocks commits</td></tr>
+<tr><td>Recover old primary (pg_rewind)</td><td>streaming, sync-replication</td><td>2 ✅</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Needs <code>db_admin_password</code></td></tr>
+<tr><td>Network disruption</td><td>streaming, sync-replication</td><td>2 ✅, 3 rec.</td><td>2 / 2 GB / 20 GB</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td></td></tr>
+<tr><td>Switchover</td><td>patroni</td><td>3 ✅ (odd)</td><td>2 / 4 GB / 20 GB SSD</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Patroni REST <code>/switchover</code>; etcd on the same nodes</td></tr>
+<tr><td>Failover, automatic</td><td>patroni</td><td>3 ✅ (odd)</td><td>2 / 4 GB / 20 GB SSD</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>New leader within ~ttl (30 s); etcd needs fast fsync</td></tr>
+<tr><td>DCS quorum loss (etcd)</td><td>patroni</td><td>3 ✅; 5 to survive 2</td><td>2 / 4 GB / 20 GB SSD</td><td>4 / 8 GB / 50 GB SSD</td><td>x86_64, aarch64</td><td>Leader demotes; read-only until etcd quorum returns</td></tr>
+</table>
+
+<h3>2.4 General requirements</h3>
+<table>
+<tr><th>Item</th><th>Minimum</th><th>Recommended</th><th>Notes</th></tr>
+<tr><td>OS</td><td>apt-based (Ubuntu, Debian)</td><td>same release on all nodes</td><td>Tested: Ubuntu 22.04 / 24.04, Debian 12. Other apt releases run with a warning; the vendor repo must publish the release. Non-apt OS is refused.</td></tr>
+<tr><td>Disk</td><td>any</td><td>SSD / NVMe</td><td>HDD or shared disks make commit latency noisy</td></tr>
+<tr><td>Node network</td><td>every node reaches every other on the strategy ports</td><td>&lt; 1 ms in one DC</td><td>Multi-DC: semi-sync and sync pay one RTT per commit</td></tr>
+<tr><td>Operator network</td><td>SSH + client + monitoring ports reachable</td><td>Tailscale, VPN or same LAN</td><td></td></tr>
+<tr><td>Access</td><td>SSH key login, passwordless sudo</td><td></td><td>Or pass <code>ARGS=-K</code> to type the sudo password</td></tr>
+<tr><td>Low RAM (2 GB)</td><td colspan="3"><code>buffer_pool_ratio</code> / <code>shared_buffers_ratio</code> = 0.25 in <code>config/ha.yml</code>. Also on servers shared with other services.</td></tr>
+<tr><td>Operator machine</td><td>2 cores / 4 GB free</td><td>4 cores / 8 GB free</td><td>JMeter + Docker (Prometheus, Grafana)</td></tr>
+</table>
+
+<h3>2.5 Which strategies fit my node count</h3>
+<table>
+<tr><th>Nodes</th><th>MySQL</th><th>MariaDB</th><th>PostgreSQL</th></tr>
+<tr><td>1</td><td colspan="3">Direct load benchmarks only (no HA)</td></tr>
+<tr><td>2</td><td>async-replication, semi-sync</td><td>async-replication, semi-sync</td><td>streaming-replication, sync-replication</td></tr>
+<tr><td>3+</td><td>all of the above + orchestrator, innodb-cluster, percona-xtradb-cluster</td><td>+ galera</td><td>+ patroni</td></tr>
+</table>
+</section>
+
+<!-- 3 -->
+<section class="chapter">
+<h2>3. Preparing the nodes</h2>
+<h3>3.1 Choosing servers</h3>
+<ul>
+  <li><b>Bare metal or VMs</b> both work. Cloud VMs, Proxmox/VMware VMs and local VMs (UTM, VirtualBox) are fine if the operator machine reaches them.</li>
+  <li><b>MySQL needs x86_64.</b> repo.mysql.com publishes amd64 packages only. On Apple-silicon UTM (arm64) use MariaDB or PostgreSQL.</li>
+  <li>Servers that already run other services are supported. The lab uses its own ports and refuses to touch anything it did not create (chapter 11).</li>
+</ul>
+
+<h3>3.2 SSH key</h3>
+<pre><code>ssh-keygen -t ed25519 -f ~/.ssh/db-ha-lab_ed25519 -C "db-ha-lab"
+ssh-copy-id -i ~/.ssh/db-ha-lab_ed25519.pub &lt;user&gt;@&lt;node&gt;
+ssh-add --apple-use-keychain ~/.ssh/db-ha-lab_ed25519     # macOS: key with a passphrase</code></pre>
+<p>Ed25519 is the recommended key type: short, fast and as strong as RSA-3072+. The <code>-C</code> comment is a label only; it does not bind the key to an email account.</p>
+
+<h3>3.3 A user with passwordless sudo</h3>
+<p>Each node can use a different SSH user (set per node in <code>inventory.yml</code>). To create a dedicated user, run once on each node as an existing sudo user:</p>
+<pre><code>KEY="ssh-ed25519 AAAA... db-ha-lab"
+sudo useradd -m -s /bin/bash db-ha-lab
+sudo install -d -m 700 -o db-ha-lab -g db-ha-lab /home/db-ha-lab/.ssh
+echo "$KEY" | sudo tee /home/db-ha-lab/.ssh/authorized_keys &gt;/dev/null
+sudo chown db-ha-lab: /home/db-ha-lab/.ssh/authorized_keys; sudo chmod 600 /home/db-ha-lab/.ssh/authorized_keys
+echo "db-ha-lab ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/db-ha-lab &gt;/dev/null
+sudo chmod 440 /etc/sudoers.d/db-ha-lab &amp;&amp; sudo visudo -cf /etc/sudoers.d/db-ha-lab</code></pre>
+<div class="box note"><span class="t">Why NOPASSWD sudo</span>Ansible runs many privileged steps non-interactively. Without it, every run needs <code>ARGS=-K</code> and the password. The user does not need to be root, and root login over SSH is not needed.</div>
+
+<h3>3.4 Before the first run</h3>
+<ul>
+  <li>No other <code>apt</code> may be running. A forgotten interactive <code>apt install</code> holds the dpkg lock for hours (see 12.1).</li>
+  <li>On Ubuntu, stop <code>needrestart</code> from waiting for an answer:
+<pre><code>echo "\$nrconf{restart} = 'a';" | sudo tee /etc/needrestart/conf.d/50-auto.conf</code></pre></li>
+  <li><code>python3</code> must be installed (Ubuntu and Debian ship it).</li>
+</ul>
+</section>
+
+<!-- 4 -->
+<section class="chapter">
+<h2>4. Networks</h2>
+<p>The lab does not create networks. You describe the networks the nodes are already on, and the lab uses them for checks, firewall rules, addresses and TLS decisions.</p>
+
+<h3>4.1 Network types</h3>
+<table>
+<tr><th></th><th>tailscale</th><th>vpn</th><th>private</th><th>direct</th></tr>
+<tr><td>Meaning</td><td>Tailscale tailnet</td><td>WireGuard / OpenVPN / IPsec you manage</td><td>Plain internal LAN</td><td>Any other routed network (LAN, public IPs)</td></tr>
+<tr><td>Interface</td><td><code>tailscale0</code></td><td>yours (<code>wg-lab</code>, <code>tun0</code>)</td><td>yours (<code>eth1</code>)</td><td>yours</td></tr>
+<tr><td><code>cidrs</code></td><td>Tailscale ranges (automatic)</td><td>required</td><td>required</td><td>required</td></tr>
+<tr><td>Encrypted</td><td>yes</td><td>yes</td><td><b>no: TLS enforced</b></td><td><b>no: TLS enforced</b></td></tr>
+<tr><td>Tailscale CLI needed</td><td>yes (warnings only)</td><td>no</td><td>no</td><td>no</td></tr>
+</table>
+<p>On unencrypted networks the lab enforces TLS everywhere: <code>require_secure_transport=ON</code>, TLS replication, <code>sslMode=REQUIRED</code> for JMeter, <code>memberSslMode: REQUIRED</code> for InnoDB Cluster, encrypted Galera/PXC traffic.</p>
+
+<h3>4.2 Two kinds of traffic</h3>
+<table>
+<tr><th>Setting</th><th>Carries</th><th>Default</th></tr>
+<tr><td><code>environment.network</code> (per node <code>network</code>)</td><td>node ↔ node: replication, failover, Galera, etcd, mesh check</td><td>the only network when there is one</td></tr>
+<tr><td><code>environment.operator_network</code> (per node <code>operator_network</code>)</td><td>operator machine → node: SSH, Prometheus, probes, JMeter</td><td>same as <code>network</code></td></tr>
+</table>
+<p>Each node lists its address on each network with <code>addresses: {network: address}</code>. <code>address:</code> is the short form when a node is on one network. <code>ssh</code> holds only credentials: <code>user</code>, <code>port</code>, <code>private_key</code>, <code>proxy_jump</code>, <code>become_password_env</code>.</p>
+
+<h3>4.3 Layout cases</h3>
+<table>
+<tr><th>#</th><th>Layout</th><th>Config</th><th>Result</th></tr>
+<tr><td>1</td><td>All nodes on one tailnet</td><td><code>network: tailnet</code>, <code>address:</code> per node</td><td class="ok">accepted</td></tr>
+<tr><td>2</td><td>All nodes on one LAN, operator on the same LAN</td><td>one <code>private</code> network with <code>cidrs</code></td><td class="ok">accepted (TLS enforced)</td></tr>
+<tr><td>3</td><td>All nodes on a WireGuard overlay</td><td>one <code>vpn</code> network</td><td class="ok">accepted</td></tr>
+<tr><td>4</td><td>Public IPs, no VPN</td><td>one <code>direct</code> network</td><td class="ok">accepted (TLS enforced)</td></tr>
+<tr><td>5</td><td>Nodes replicate over WireGuard, operator reaches them over Tailscale</td><td><code>network: wg</code>, <code>operator_network: tailnet</code>, <code>addresses</code> with both</td><td class="ok">accepted</td></tr>
+<tr><td>6</td><td>Nodes on a LAN, operator through a bastion</td><td>one <code>private</code> network, <code>ssh.proxy_jump: user@bastion</code></td><td class="ok">accepted (SSH only; Prometheus/JMeter need a route)</td></tr>
+<tr><td>7</td><td>Mixed: some nodes on a LAN, others on a tailnet, all routed to each other</td><td>per-node <code>network</code></td><td class="ok">accepted, if every pair is routable</td></tr>
+<tr><td>8</td><td>One node with a different operator path</td><td>per-node <code>operator_network</code></td><td class="ok">accepted</td></tr>
+<tr><td>9</td><td>Different SSH user/port/key per node</td><td>per-node <code>ssh:</code></td><td class="ok">accepted</td></tr>
+<tr><td>10</td><td>Hostnames instead of IPs</td><td><code>address: db-01.tailnet.ts.net</code></td><td class="ok">accepted (must resolve inside the network)</td></tr>
+<tr><td>11</td><td>Node missing an address on the node network</td><td><code>addresses</code> without <code>wg</code></td><td class="no">refused: <code>no address on network 'wg' (node-to-node network); add addresses.wg</code></td></tr>
+<tr><td>12</td><td>Node missing an address on the operator network</td><td><code>addresses</code> without <code>tailnet</code></td><td class="no">refused: <code>no address on operator network 'tailnet'; add addresses.tailnet</code></td></tr>
+<tr><td>13</td><td>Address outside the network's cidrs</td><td><code>wg: 10.98.0.1</code> with cidrs 10.99.0.0/24</td><td class="no">refused: <code>addresses.wg 10.98.0.1 is outside network 'wg' cidrs</code></td></tr>
+<tr><td>14</td><td>Operator network not defined</td><td><code>operator_network: lan</code> with no <code>lan</code></td><td class="no">refused: <code>operator_network 'lan' is not defined in networks</code></td></tr>
+<tr><td>15</td><td>Different paths per node pair, or NAT/port mapping between nodes</td><td>-</td><td class="no">not supported: cluster managers advertise one address per node. Use one overlay (WireGuard, Tailscale).</td></tr>
+</table>
+
+<h3>4.4 WireGuard overlay between two servers (case 5)</h3>
+<p>Use it when nodes cannot reach each other directly, for example when one tailnet device is tagged and cannot reach machines shared into the tailnet. One side listens; the other connects over a path that already works (here, Tailscale).</p>
+<pre><code># both servers
+sudo apt-get install -y wireguard
+sudo sh -c 'umask 077; wg genkey &gt; /etc/wireguard/lab.key'
+sudo cat /etc/wireguard/lab.key | wg pubkey            # note the public key
+
+# server A (listens) /etc/wireguard/wg-lab.conf
+[Interface]
+Address = 10.99.0.1/24
+ListenPort = 51820
+PostUp = wg set %i private-key /etc/wireguard/lab.key
+[Peer]
+PublicKey = &lt;B public key&gt;
+AllowedIPs = 10.99.0.2/32
+
+# server B (connects) /etc/wireguard/wg-lab.conf
+[Interface]
+Address = 10.99.0.2/24
+PostUp = wg set %i private-key /etc/wireguard/lab.key
+[Peer]
+PublicKey = &lt;A public key&gt;
+Endpoint = &lt;A reachable IP&gt;:51820
+AllowedIPs = 10.99.0.1/32
+PersistentKeepalive = 25
+
+# both
+sudo systemctl enable --now wg-quick@wg-lab
+sudo wg show            # "latest handshake" must be recent
+ping -c3 10.99.0.1      # from B</code></pre>
+<p>Inventory for this layout:</p>
+<pre><code>environment: {name: lab, network: wg, operator_network: tailnet}
+networks:
+  wg:      {type: vpn, interface: wg-lab, cidrs: [10.99.0.0/24]}
+  tailnet: {type: tailscale}
+nodes:
+  - name: lab-a
+    addresses: {wg: 10.99.0.1, tailnet: 100.x.y.z}
+    role: primary
+    datacenter: dc-01
+    ssh: {user: lab1, private_key: ~/.ssh/db-ha-lab_ed25519}</code></pre>
+<div class="box note"><span class="t">Effect on the existing server</span>WireGuard adds one interface and one route (10.99.0.0/24). It does not change the default route, DNS, Docker networks or firewall rules. Pick a subnet that does not overlap existing routes (<code>ip route</code>, <code>docker network inspect</code>). Remove with <code>sudo systemctl disable --now wg-quick@wg-lab</code>.</div>
+
+<h3>4.5 Firewall</h3>
+<ul>
+  <li><b>Default backend <code>nftables</code></b>: the lab loads its own table <code>inet halab</code> (<code>halab-firewall.service</code>). It covers only the lab ports. On the node-network and operator-network interfaces it accepts the networks' <code>cidrs</code> plus <code>allowed_sources</code> and drops other sources for those ports. Other ports and existing rules are untouched.</li>
+  <li><b>ufw already active on the host</b>: ufw drops in its own table whatever <code>halab</code> accepts. The lab therefore also adds narrow ufw allow rules (comment <code>ha-lab</code>): lab ports only, from lab sources only, on lab interfaces only. ufw's policy and your rules are not changed. <code>make destroy DATA=1</code> removes them.</li>
+  <li><code>firewall.backend: ufw</code> in <code>config/monitoring.yml</code> makes ufw the backend (host-wide default deny). <code>none</code> leaves the firewall to you.</li>
+</ul>
+<div class="box warn"><span class="t">Docker and ufw</span>Ports published by Docker (<code>0.0.0.0:6379-&gt;6379</code>) skip ufw rules. Lab rules do not change that. Bind published ports to <code>127.0.0.1</code> or a private address if the server is public.</div>
+</section>
+
+<!-- 5 -->
+<section class="chapter">
+<h2>5. Configuration files</h2>
+<p><code>make init</code> copies each <code>config/*.example.yml</code> to <code>config/*.yml</code> (never overwrites). The real files are gitignored; only the examples are committed.</p>
+<table>
+<tr><th>File</th><th>Contents</th></tr>
+<tr><td><code>config/inventory.yml</code></td><td>environment, networks, nodes (addresses, role, datacenter, ssh, optional engine overrides)</td></tr>
+<tr><td><code>config/ha.yml</code></td><td><code>db_engine</code>, <code>ha_provider</code>, engine section (version, port, server options), strategy settings, exporter ports</td></tr>
+<tr><td><code>config/secrets.yml</code></td><td><code>db_replication_password</code>, <code>db_benchmark_password</code>, <code>db_exporter_password</code>, <code>db_admin_password</code> (16+ characters)</td></tr>
+<tr><td><code>config/monitoring.yml</code></td><td><code>allowed_sources</code>, firewall backend, scrape settings</td></tr>
+</table>
+
+<h3>5.1 Node fields</h3>
+<table>
+<tr><th>Field</th><th>Required</th><th>Meaning</th></tr>
+<tr><td><code>name</code></td><td>yes</td><td>DNS label, unique</td></tr>
+<tr><td><code>address</code> / <code>addresses</code></td><td>yes</td><td>One network: <code>address</code>. Several: <code>{network: address}</code></td></tr>
+<tr><td><code>role</code></td><td>yes</td><td><code>primary</code> (exactly one) or <code>replica</code></td></tr>
+<tr><td><code>datacenter</code></td><td>yes</td><td>Label used in dashboards and placement</td></tr>
+<tr><td><code>ssh</code></td><td>yes</td><td><code>user</code> (required), <code>port</code>, <code>private_key</code>, <code>proxy_jump</code>, <code>become_password_env</code></td></tr>
+<tr><td><code>network</code>, <code>operator_network</code></td><td>no</td><td>Per-node overrides of the environment defaults</td></tr>
+<tr><td><code>server_id</code></td><td>no</td><td>MySQL/MariaDB server id (unique)</td></tr>
+<tr><td><code>mysql:</code> / <code>mariadb:</code> / <code>postgres:</code></td><td>no</td><td>Per-node server options</td></tr>
+</table>
+
+<h3>5.2 Minimal <code>ha.yml</code></h3>
+<pre><code>db_engine: mysql
+ha_provider: async-replication
+mysql:
+  buffer_pool_ratio: 0.25      # shared server or 2 GB RAM</code></pre>
+</section>
+
+<!-- 6 -->
+<section class="chapter">
+<h2>6. Lifecycle: from empty servers to a running topology</h2>
+<table>
+<tr><th>Step</th><th>Command</th><th>What happens</th><th>Changes nodes</th></tr>
+<tr><td>1</td><td><code>make init</code></td><td>Creates <code>config/*.yml</code> from the examples</td><td>no</td></tr>
+<tr><td>2</td><td><code>make deps</code></td><td>Installs pinned Ansible collections</td><td>no</td></tr>
+<tr><td>3</td><td><code>make validate</code></td><td>Local tools, config, secrets, DNS, SSH, sudo, OS, connectivity mesh</td><td>no (temporary port listeners for ~2 min)</td></tr>
+<tr><td>4</td><td><code>make plan-host</code></td><td>Read-only: packages, services, users, paths, ports the lab would add; conflicts</td><td>no</td></tr>
+<tr><td>5</td><td><code>make provision</code></td><td>Firewall, chrony (if no time daemon), database server, accounts, exporters, collector</td><td><b>yes</b></td></tr>
+<tr><td>6</td><td><code>make mesh-check</code></td><td>Every node pair on the strategy ports + TLS login; operator → nodes</td><td>no</td></tr>
+<tr><td>7</td><td><code>make ha</code></td><td>Builds the topology of <code>ha_provider</code></td><td><b>yes</b></td></tr>
+<tr><td>8</td><td><code>make topology</code></td><td>Roles, lag, health</td><td>no</td></tr>
+<tr><td>9</td><td><code>make targets &amp;&amp; make monitoring</code></td><td>Prometheus + Grafana on the operator machine</td><td>no</td></tr>
+</table>
+<div class="box danger"><span class="t">Do not run two lab commands at the same time</span>The mesh check starts temporary listeners on free lab ports. If <code>make validate</code> runs during <code>make provision</code>, an exporter starting at that moment cannot bind its port. Wait for one command to finish before you start the next.</div>
+
+<div class="box warn"><span class="t">Switching strategy or engine: follow this order</span>
+<code>make destroy</code> acts on what <code>config/ha.yml</code> says <b>now</b>. Run it before you edit the file.
+<ol>
+  <li>Remove the current topology:
+    <ul><li>Same engine, other strategy: <code>make destroy</code></li>
+        <li>Other engine: <code>make destroy DATA=1</code> (deletes the database packages and <b>all data</b>)</li></ul></li>
+  <li>Edit <code>ha_provider</code> (and <code>db_engine</code>) in <code>config/ha.yml</code>.</li>
+  <li>If <code>db_engine</code> changed, run <code>make provision</code>.</li>
+  <li>Run <code>make ha</code>.</li>
+</ol>
+Deployment refuses a different provider while the old one is still recorded on the nodes.</div>
+
+<div class="box note"><span class="t"><code>make ha</code> and <code>HA=</code></span><code>make ha</code> deploys <code>ha_provider</code> from <code>config/ha.yml</code>. <code>make ha HA=x</code> is accepted only when <code>x</code> equals that value.</div>
+</section>
+
+<!-- 7 -->
+<section class="chapter">
+<h2>7. HA strategies</h2>
+<table>
+<tr><th><code>db_engine</code></th><th><code>ha_provider</code></th><th>Failover</th><th>Min nodes</th><th>Durability</th></tr>
+<tr><td rowspan="5">mysql</td><td>async-replication</td><td>manual (<code>make promote</code>)</td><td>2</td><td>Commits not yet shipped are lost on failover</td></tr>
+<tr><td>semi-sync</td><td>manual</td><td>2</td><td>Commit waits for N replica acks (AFTER_SYNC); silently falls back to async after <code>timeout_ms</code></td></tr>
+<tr><td>orchestrator</td><td>automatic (Orchestrator raft)</td><td>3</td><td>Same as async; Orchestrator decides who is primary</td></tr>
+<tr><td>innodb-cluster</td><td>automatic (Group Replication + Router)</td><td>3 (max 9)</td><td>Majority certification before commit returns</td></tr>
+<tr><td>percona-xtradb-cluster</td><td>Galera, multi-primary</td><td>3</td><td>Virtually synchronous; quorum required for writes</td></tr>
+<tr><td rowspan="4">mariadb</td><td>async-replication</td><td>manual</td><td>2</td><td>As MySQL async; MariaDB GTID domains</td></tr>
+<tr><td>semi-sync</td><td>manual</td><td>2</td><td>Waits for exactly 1 replica</td></tr>
+<tr><td>galera</td><td>Galera, multi-primary</td><td>3</td><td>Virtually synchronous; mariabackup SST</td></tr>
+<tr><td>maxscale</td><td colspan="3">planned, refused at validate time</td></tr>
+<tr><td rowspan="3">postgres</td><td>streaming-replication</td><td>manual, LSN-based</td><td>2</td><td>Async WAL streaming; <code>pg_rewind</code> recovery</td></tr>
+<tr><td>sync-replication</td><td>manual</td><td>2</td><td><code>ANY n</code> synchronous standbys</td></tr>
+<tr><td>patroni</td><td>automatic (Patroni + etcd)</td><td>3</td><td>Async or <code>synchronous_mode</code>; leader key TTL 30 s</td></tr>
+</table>
+
+<h3>7.1 Per-strategy notes</h3>
+<h4>MySQL async-replication / semi-sync</h4>
+<ul><li>GTID with <code>SOURCE_AUTO_POSITION=1</code>; replicas are <code>super_read_only</code>.</li>
+<li><code>repl</code> account exists on every node, created with <code>sql_log_bin=0</code>, so any node can be promoted without errant GTIDs.</li>
+<li>Semi-sync settings (<code>config/ha.yml</code> → <code>semi_sync</code>): <code>wait_for_replica_count</code> (1), <code>timeout_ms</code> (10000), <code>wait_point</code> (AFTER_SYNC).</li></ul>
+<h4>MySQL orchestrator</h4>
+<ul><li>Percona Orchestrator on every node with raft (no backend DB). HTTP on 13000, basic auth <code>orchestrator</code> / <code>db_admin_password</code>.</li>
+<li>Decides who is primary; it cannot recover transactions that never left the failed primary.</li></ul>
+<h4>MySQL innodb-cluster</h4>
+<ul><li>Single-primary Group Replication managed with MySQL Shell. MySQL Router on every node: RW 16446, RO 16447.</li></ul>
+<h4>MySQL percona-xtradb-cluster</h4>
+<ul><li>Replaces Oracle MySQL packages: choose it <b>before</b> provisioning. <code>pxc_strict_mode=ENFORCING</code>, SST <code>xtrabackup-v2</code>.</li></ul>
+<h4>MariaDB galera</h4>
+<ul><li><code>galera-4</code>, SST <code>mariabackup</code>, TLS forced on private networks.</li>
+<li><code>make recover</code> handles one node down, quorum loss, and full outage (bootstraps from the highest seqno; override with <code>-e mariadb_galera_bootstrap_node=&lt;node&gt;</code>).</li></ul>
+<h4>PostgreSQL streaming / sync-replication</h4>
+<ul><li>One PGDG cluster named <code>halab</code> per node; other clusters are never touched.</li>
+<li>Standbys built by <code>pg_basebackup</code>; <code>wal_log_hints=on</code> so an old primary can be rewound. <code>wal_keep_size=1GB</code>, no slots.</li>
+<li>Rewind needs <code>db_admin_password</code>.</li></ul>
+<h4>PostgreSQL patroni</h4>
+<ul><li>Per node: <code>halab-etcd</code>, <code>halab-patroni</code> (REST 18008, TLS), PostgreSQL 15432. etcd client 12379, peer 12380.</li>
+<li>Switchover via Patroni REST <code>/switchover</code>. Automatic failover when the leader key expires (~30 s).</li></ul>
+<p class="small">Full runbooks: <code>ha/&lt;engine&gt;/&lt;strategy&gt;/README.md</code>.</p>
+</section>
+
+<!-- 8 -->
+<section class="chapter">
+<h2>8. Test scenarios</h2>
+<h3>8.1 Planned switchover</h3>
+<pre><code>make switchover                         # picks the most advanced candidate
+make switchover NEW_PRIMARY=lab-ivan</code></pre>
+<p>Fences the old primary, waits for the candidate to catch up, promotes it, repoints the others. If promotion fails, the old primary is unfenced. Expected data loss: none.</p>
+
+<h3>8.2 Unplanned failover (primary lost)</h3>
+<pre><code>make fault NODE=lab-hanif FAULT=kill-db CONFIRM=yes
+make topology
+make promote                           # or NEW_PRIMARY=lab-ivan; FORCE=1 skips safety checks
+make recover NODE=lab-hanif            # old primary rejoins as replica</code></pre>
+<p>Manual strategies need <code>make promote</code>. Automatic strategies (orchestrator, innodb-cluster, patroni) promote by themselves; Galera/PXC have no promotion.</p>
+
+<h3>8.3 Faults</h3>
+<table>
+<tr><th><code>FAULT=</code></th><th>Effect</th><th>Restore</th></tr>
+<tr><td><code>stop-db</code></td><td>Clean stop of the database service</td><td><code>ACTION=restore</code></td></tr>
+<tr><td><code>kill-db</code></td><td>SIGKILL the server process (crash)</td><td><code>ACTION=restore</code> or <code>make recover</code></td></tr>
+<tr><td><code>isolate</code></td><td>Drops lab traffic on the node network</td><td>Automatic scheduled restore, or <code>ACTION=restore</code></td></tr>
+<tr><td><code>netem</code></td><td>Delay / loss on the node interface</td><td>Automatic scheduled restore, or <code>ACTION=restore</code></td></tr>
+</table>
+<pre><code>make fault NODE=lab-ivan FAULT=netem CONFIRM=yes
+make fault NODE=lab-ivan FAULT=netem ACTION=restore CONFIRM=yes</code></pre>
+<div class="box warn"><span class="t">Faults on shared servers</span><code>isolate</code> and <code>netem</code> act on the lab interface. When the node network is a dedicated overlay (<code>wg-lab</code>), other services are not affected. When the node network is the server's main interface, other services on it are affected too. Keep the operator network separate so SSH stays up.</div>
+
+<h3>8.4 Benchmarks</h3>
+<pre><code>make jmeter-install
+make benchmark SCENARIO=prepare
+make benchmark SCENARIO=mixed-workload [ENDPOINT=ha|primary|&lt;node&gt;] [J="threads=32 duration=600"]</code></pre>
+<table>
+<tr><th>Scenario</th><th>Read ratio</th><th>Threads</th><th>Ramp-up (s)</th><th>Duration (s)</th><th>Use</th></tr>
+<tr><td>prepare</td><td>-</td><td>1</td><td>0</td><td>up to 1800</td><td>Create and load the test schema (run first)</td></tr>
+<tr><td>baseline</td><td>0.5</td><td>2</td><td>10</td><td>120</td><td>Low-load reference latency</td></tr>
+<tr><td>read-heavy</td><td>0.8</td><td>16</td><td>30</td><td>300</td><td>Read scaling</td></tr>
+<tr><td>write-heavy</td><td>0.2</td><td>16</td><td>30</td><td>300</td><td>Commit cost of the strategy</td></tr>
+<tr><td>mixed-workload</td><td>0.5</td><td>16</td><td>30</td><td>300</td><td>General comparison</td></tr>
+<tr><td>spike-test</td><td>0.5</td><td>8 + spike</td><td>10</td><td>300</td><td>Burst behaviour</td></tr>
+<tr><td>soak-test</td><td>0.5</td><td>16</td><td>60</td><td>3600</td><td>Long run, needs +20 GB disk</td></tr>
+<tr><td>failover-test</td><td>0.2</td><td>8</td><td>10</td><td>300</td><td>Load during a failover</td></tr>
+<tr><td>network-disruption</td><td>0.5</td><td>8</td><td>10</td><td>300</td><td>Load during isolate/netem</td></tr>
+</table>
+<p>Every default can be overridden: <code>J="threads=32 duration=600 read_ratio=0.7"</code>.</p>
+
+<h3>8.5 Failover experiment under load</h3>
+<pre><code>make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate]</code></pre>
+<p>Runs load, injects the fault on the primary, fails over, and measures <b>RTO</b> (time without a writable primary), <b>RPO</b> (acknowledged writes lost) and ledger consistency. <code>make report</code> rebuilds the report.</p>
+
+<h3>8.6 Scenario × strategy expectations</h3>
+<table>
+<tr><th>Scenario</th><th>async</th><th>semi-sync</th><th>orchestrator</th><th>innodb-cluster</th><th>Galera / PXC</th><th>PG streaming</th><th>PG sync</th><th>Patroni</th></tr>
+<tr><td>Switchover data loss</td><td>none</td><td>none</td><td>none</td><td>none</td><td>n/a</td><td>none</td><td>none</td><td>none</td></tr>
+<tr><td>Failover data loss</td><td>possible</td><td>none unless fallen back to async</td><td>possible</td><td>none (majority)</td><td>none (quorum)</td><td>possible</td><td>none</td><td>possible (none in sync mode)</td></tr>
+<tr><td>Who promotes</td><td>you</td><td>you</td><td>Orchestrator</td><td>group</td><td>no promotion</td><td>you</td><td>you</td><td>Patroni</td></tr>
+<tr><td>Minority partition</td><td>may split brain</td><td>may split brain</td><td>raft minority cannot promote</td><td>minority read-only</td><td>minority non-primary</td><td>may split brain</td><td>commits block</td><td>leader demotes</td></tr>
+</table>
+</section>
+
+<!-- 9 -->
+<section class="chapter">
+<h2>9. Monitoring and reports</h2>
+<pre><code>make targets &amp;&amp; make monitoring    # Prometheus + Grafana + client probe (Docker)
+make metrics-check                   # promtool, exporter checks, target health
+make status                          # inventory, monitoring, exporters, topology</code></pre>
+<p>Grafana: <code>http://127.0.0.1:3000</code>, user <code>admin</code>, password in <code>local/compose/.env</code>. Folder <b>Database HA Lab</b>: HA Overview, Latency Breakdown, Network, MySQL Performance, Replication &amp; HA, Host &amp; Storage, JMeter Benchmark, Failover &amp; Recovery.</p>
+<p>Network diagnostics: <code>make network-check</code> (operator → nodes), <code>make network-matrix [IPERF=1]</code> (node-to-node RTT, loss, throughput).</p>
+</section>
+
+<!-- 10 -->
+<section class="chapter">
+<h2>10. Ports</h2>
+<p>Every lab default differs from the product standard, so the lab can sit next to an existing installation. All are overridable in <code>config/ha.yml</code>.</p>
+<table>
+<tr><th>Component</th><th>Standard</th><th>Lab default</th></tr>
+<tr><td>MySQL / MariaDB</td><td>3306</td><td>13306</td></tr>
+<tr><td>PostgreSQL</td><td>5432</td><td>15432</td></tr>
+<tr><td>mysqld_exporter / postgres_exporter</td><td>9104 / 9187</td><td>19104 / 19187</td></tr>
+<tr><td>node_exporter / lab collector</td><td>9100 / -</td><td>19100 / 19106</td></tr>
+<tr><td>iperf (network matrix)</td><td>5201</td><td>15201</td></tr>
+<tr><td>Orchestrator HTTP / raft</td><td>3000 / 10008</td><td>13000 / 13008</td></tr>
+<tr><td>MySQL Router RW / RO</td><td>6446 / 6447</td><td>16446 / 16447</td></tr>
+<tr><td>Galera gcomm / IST / SST</td><td>4567 / 4568 / 4444</td><td>14567 / 14568 / 14444</td></tr>
+<tr><td>Patroni REST / etcd client / etcd peer</td><td>8008 / 2379 / 2380</td><td>18008 / 12379 / 12380</td></tr>
+</table>
+</section>
+
+<!-- 11 -->
+<section class="chapter">
+<h2>11. Safety guarantees</h2>
+<ul>
+<li><b>Existing services are protected.</b> <code>make plan-host</code> is read-only and runs before provisioning. Provisioning stops if a lab port is in use, a conflicting database package is installed, or (MySQL) the buffer pool would not fit in free memory.</li>
+<li><b>Packages never grab default ports.</b> The lab port config is written before the server package is installed, so the package's first start does not bind 3306 next to an existing server.</li>
+<li><b>Existing data is protected.</b> The lab refuses a datadir or cluster it did not create. It marks its own with <code>.ha-lab-managed</code> before installing, so a failed run can be resumed. Take over an existing server only with <code>ARGS="-e mysql_adopt_existing=true"</code> (or <code>mariadb_</code>, <code>postgres_</code>); data is never deleted.</li>
+<li><b>Repositories are pinned</b> to each engine's own packages.</li>
+<li><b>Time sync</b>: an existing ntp/ntpsec/openntpd is kept; chrony only when none exists.</li>
+<li><b>Topology switches are explicit</b> (chapter 6).</li>
+<li><b>No divergent replicas.</b> Errant GTIDs are refused; PostgreSQL never replaces a replica's data unless <code>-e postgres_rebuild_replica=true</code>.</li>
+<li><b>Faults need <code>CONFIRM=yes</code></b>; isolate and netem schedule their own restore.</li>
+<li><b><code>make destroy</code> asks for the environment name</b>; <code>DATA=1</code> also purges packages and data.</li>
+<li><b>Secrets stay out of Git.</b> Real config files, secrets and generated targets are gitignored.</li>
+<li><b>No database root password</b> is managed: Ansible uses the local socket (<code>auth_socket</code> / peer auth).</li>
+</ul>
+</section>
+
+<!-- 12 -->
+<section class="chapter">
+<h2>12. Troubleshooting: real cases</h2>
+<table>
+<tr><th>#</th><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+<tr><td>12.1</td><td><code>Could not get lock /var/lib/dpkg/lock-frontend ... held by process N (apt)</code></td><td>An old interactive <code>apt install</code>, often stuck in the <code>needrestart</code> screen of a closed terminal</td><td><code>ps -o pid,etime,cmd -p N</code>. If nobody is on that terminal: kill the <code>needrestart</code> process, then the apt process, then <code>sudo dpkg --configure -a</code>. Never delete lock files.</td></tr>
+<tr><td>12.2</td><td><code>wg-quick</code>: <code>Line unrecognized: `EOF'</code></td><td>The heredoc end marker was pasted with leading spaces and written into the config</td><td><code>sudo sed -i '/^[[:space:]]*EOF[[:space:]]*$/d' /etc/wireguard/wg-lab.conf</code>, restart the service</td></tr>
+<tr><td>12.3</td><td>WireGuard handshake OK but first ping fails</td><td>Ping sent before the peer's interface came up</td><td>Retry; check <code>sudo wg show</code> on both sides</td></tr>
+<tr><td>12.4</td><td>Tailscale: one node cannot reach another node shared into the tailnet</td><td>Tagged devices cannot reach shared-in machines</td><td>Build a WireGuard overlay (4.4) and use <code>network: wg</code></td></tr>
+<tr><td>12.5</td><td>DNS name fails across different tailnets</td><td>MagicDNS names resolve only inside their own tailnet</td><td>Use the 100.x addresses</td></tr>
+<tr><td>12.6</td><td><code>sudo: a password is required</code></td><td>No NOPASSWD rule</td><td>Add the sudoers file (3.3) or use <code>ARGS=-K</code></td></tr>
+<tr><td>12.7</td><td>SSH key asks for a passphrase every time</td><td>Key not in the agent</td><td><code>ssh-add --apple-use-keychain ~/.ssh/db-ha-lab_ed25519</code></td></tr>
+<tr><td>12.8</td><td><code>Ubuntu 26.04 ... not tested</code></td><td>Release outside the tested list</td><td>Warning only; continues if the vendor repo publishes the release</td></tr>
+<tr><td>12.9</td><td>Install fails: <code>Bind on TCP/IP port: Address already in use ... 3306</code></td><td>Package first start on the default port next to another MySQL (e.g. Docker)</td><td>Fixed: the lab writes its port before install. On a host left half-installed: write the lab config, then <code>sudo dpkg --configure mysql-community-server mysql-server</code></td></tr>
+<tr><td>12.10</td><td><code>port 13306 is already used by mysqld</code> on re-run</td><td>The first run failed before marking the server as lab-owned</td><td>Fixed: the marker is written before install. Old hosts: create <code>/etc/mysql/.ha-lab-managed</code> only if the lab installed that server</td></tr>
+<tr><td>12.11</td><td><code>node -&gt; peer:13306 TCP unreachable</code> while operator → node works</td><td>ufw active with default deny; Tailscale opens only <code>tailscale0</code></td><td>Fixed: provision opens lab ports in ufw on lab interfaces. Re-run <code>make provision</code></td></tr>
+<tr><td>12.12</td><td>Exporter <code>bind: address already in use</code> right after provision</td><td>Another lab command (mesh check listeners) ran at the same time</td><td><code>sudo systemctl reset-failed mysqld_exporter &amp;&amp; sudo systemctl start mysqld_exporter</code>; run one command at a time</td></tr>
+<tr><td>12.13</td><td>Later tasks fail with <code>has no attribute 'mesh_port_state'</code></td><td>A node failed an earlier check and left the run</td><td>Fix the first error; the mesh check now skips failed nodes</td></tr>
+<tr><td>12.14</td><td><code>make ha</code> prints usage</td><td>Old Makefile required <code>HA=</code></td><td>Now defaults to <code>ha_provider</code></td></tr>
+</table>
+</section>
+
+<!-- 13 -->
+<section class="chapter">
+<h2>13. Command reference</h2>
+<table>
+<tr><th>Group</th><th>Command</th><th>Purpose</th></tr>
+<tr><td rowspan="5">Configuration</td><td><code>make init</code></td><td>Create config files from examples</td></tr>
+<tr><td><code>make deps</code></td><td>Install pinned Ansible collections</td></tr>
+<tr><td><code>make validate-config</code></td><td>Config only, offline</td></tr>
+<tr><td><code>make validate-local</code></td><td>Operator machine tools</td></tr>
+<tr><td><code>make validate</code></td><td>Everything, including nodes and mesh</td></tr>
+<tr><td rowspan="4">Infrastructure</td><td><code>make plan-host</code></td><td>Read-only change plan and conflicts</td></tr>
+<tr><td><code>make provision</code></td><td>Install engine, exporters, collector, firewall</td></tr>
+<tr><td><code>make configure-exporters</code></td><td>Reinstall exporters and collectors only</td></tr>
+<tr><td><code>make collect-info</code></td><td>Node specs to <code>local/state/node-info.json</code></td></tr>
+<tr><td rowspan="3">Network</td><td><code>make mesh-check</code></td><td>Node pairs + TLS login + operator access</td></tr>
+<tr><td><code>make network-check</code></td><td>Operator → node DNS, ping, ports</td></tr>
+<tr><td><code>make network-matrix [IPERF=1]</code></td><td>Node-to-node RTT, loss, throughput</td></tr>
+<tr><td rowspan="5">HA</td><td><code>make ha</code></td><td>Deploy <code>ha_provider</code></td></tr>
+<tr><td><code>make topology</code></td><td>Roles and health</td></tr>
+<tr><td><code>make switchover [NEW_PRIMARY=]</code></td><td>Planned primary change</td></tr>
+<tr><td><code>make promote [NEW_PRIMARY=] [FORCE=1]</code></td><td>Failover after primary loss</td></tr>
+<tr><td><code>make recover NODE=</code></td><td>Bring a failed node back</td></tr>
+<tr><td>Faults</td><td><code>make fault NODE= FAULT= [ACTION=restore] CONFIRM=yes</code></td><td>stop-db, kill-db, isolate, netem</td></tr>
+<tr><td rowspan="4">Benchmark</td><td><code>make jmeter-install</code></td><td>JMeter 5.6.3 + JDBC driver + plugins</td></tr>
+<tr><td><code>make benchmark SCENARIO= [ENDPOINT=] [J=]</code></td><td>Run a scenario</td></tr>
+<tr><td><code>make failover CONFIRM=yes [FAULT=]</code></td><td>Failover experiment: RTO, RPO, consistency</td></tr>
+<tr><td><code>make report [RUN=]</code></td><td>Rebuild a report</td></tr>
+<tr><td rowspan="5">Monitoring</td><td><code>make targets</code></td><td>Prometheus targets from the inventory</td></tr>
+<tr><td><code>make monitoring</code> / <code>monitoring-stop</code> / <code>monitoring-status</code></td><td>Local Prometheus + Grafana + probe</td></tr>
+<tr><td><code>make metrics-check</code></td><td>Exporter and target health</td></tr>
+<tr><td><code>make probes-start</code> / <code>probes-stop</code></td><td>Client-to-node probe exporter (:9465)</td></tr>
+<tr><td><code>make status</code></td><td>Overall status</td></tr>
+<tr><td>Teardown</td><td><code>make destroy [DATA=1]</code></td><td>Remove topology; <code>DATA=1</code> purges packages and data</td></tr>
+<tr><td>Docs</td><td><code>make manual</code></td><td>Rebuild this PDF</td></tr>
+</table>
+</section>
+
+</body>
+</html>

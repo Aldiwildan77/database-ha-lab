@@ -49,7 +49,7 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 
 "End to end" means deploy, idempotent redeploy, health, switchover, unplanned failover, recover, ledger consistency and destroy, run against database containers with the Ansible Docker connection. None of it has run on a real Ubuntu host with systemd yet: package installs, service units and the firewall are untested there.
 
-Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See [docs/architecture/engines.md](docs/architecture/engines.md) for the layout and how to add an engine, and [ha/README.md](ha/README.md) for the HA scenario runbooks of every engine. [docs/architecture/diagrams.md](docs/architecture/diagrams.md) has diagrams of the components, the engine abstraction, the lab lifecycle, failover and a benchmark run.
+Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See [docs/architecture/engines.md](docs/architecture/engines.md) for the layout and how to add an engine, and [ha/README.md](ha/README.md) for the HA scenario runbooks of every engine. [docs/architecture/diagrams.md](docs/architecture/diagrams.md) has diagrams of the components, the engine abstraction, the lab lifecycle, failover and a benchmark run. The operator manual, [docs/manuals/database-ha-lab-manual.pdf](docs/manuals/database-ha-lab-manual.pdf), covers sizing, networks, setup, every strategy and scenario, and troubleshooting in one document (`make manual` rebuilds it).
 
 ## Requirements
 

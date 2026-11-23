@@ -6,7 +6,9 @@ require curl python3
 prom="http://127.0.0.1:${PROMETHEUS_PORT:-9090}"
 fail=0
 
-[[ -f local/prometheus/targets/node.json ]] || { red "no targets yet: run make targets"; exit 1; }
+for t in node db; do
+  [[ -f "local/prometheus/targets/${t}.json" ]] || { red "no ${t} targets yet: run make targets"; exit 1; }
+done
 
 echo "== Exporters (direct)"
 while read -r node addr; do
@@ -38,7 +40,8 @@ for t in json.load(sys.stdin)["data"]["activeTargets"]:
     ok = t["health"] == "up"
     bad += not ok
     err = "" if ok else " " + t.get("lastError", "")
-    print(f"  {l.get(\"job\"):10} {l.get(\"node\", l.get(\"instance\")):20} {t[\"health\"]}{err}")
+    job, node = l.get("job", ""), l.get("node", l.get("instance", ""))
+    print("  {:10} {:20} {}{}".format(job, node, t["health"], err))
 sys.exit(1 if bad else 0)
 ' <<<"$targets" || fail=1
 else
