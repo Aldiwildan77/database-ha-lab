@@ -44,6 +44,8 @@
       {{ groups['db_nodes'] | map('extract', hostvars) | selectattr('node_fqdn', 'equalto', old_primary_fqdn)
          | map(attribute='inventory_hostname') | first | default('') }}
     old_primary_up: "{{ old_primary != '' and hostvars[old_primary].lab_topo.db_up }}"
+    # A crashed primary restarted by systemd comes back read-only: it is up but no longer serves writes.
+    old_primary_writable: "{{ old_primary_up and not hostvars[old_primary].lab_topo.read_only }}"
     candidates: "{{ topo | selectattr('db_up') | selectattr('replica.source_host', 'defined') | map(attribute='node') | list }}"
   pre_tasks:
     - name: Load secrets
@@ -59,12 +61,12 @@
           - old_primary != ''
           - candidates | length > 0
           - failover_mode != 'switchover' or old_primary_up
-          - failover_mode != 'failover' or not old_primary_up or (force | default(false) | bool)
+          - failover_mode != 'failover' or not old_primary_writable or (force | default(false) | bool)
           - new_primary | default('') == '' or new_primary in candidates
         fail_msg: >-
           Cannot {{ failover_mode }}: old_primary={{ old_primary or 'unknown' }} up={{ old_primary_up }}
-          candidates={{ candidates }} requested={{ new_primary | default('auto') }}. The requested node must be a
-          running replica. An unplanned failover while the old primary is still up risks split brain; use
+          writable={{ old_primary_writable }} candidates={{ candidates }} requested={{ new_primary | default('auto') }}.
+          The requested node must be a running replica. An unplanned failover while the old primary is still writable risks split brain; use
           switchover, or pass -e force=true (the old primary is fenced read-only if reachable).
         quiet: true
       run_once: true
