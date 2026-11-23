@@ -13,7 +13,8 @@
     path: "{{ replication_state_file }}"
     section: mariadbd
     option: "{{ item.key }}"
-    value: "{{ item.value }}"
+    # read_only is always persisted as 1: a restarted node comes back read-only, never as a second primary.
+    value: "{{ 1 if item.key == 'read_only' else item.value }}"
     no_extra_spaces: false
     mode: "0644"
   loop: "{{ replication_vars | dict2items }}"

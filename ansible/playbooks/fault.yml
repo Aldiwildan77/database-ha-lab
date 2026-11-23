@@ -3,6 +3,18 @@
 # Acts on the node's lab interface (tailscale0, eth1, wg0, ...).
 #   -e node=<name> -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore   (stop-mysql, kill-mysql still accepted)
 #   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
+# Before restarting a stopped or killed database, read who is writable: a node that lost its primary role
+# must not come back as a second primary.
+- name: Read topology before a database restore
+  hosts: db_nodes
+  gather_facts: false
+  tasks:
+    - name: Read topology
+      ansible.builtin.include_tasks: ../tasks/topology-facts.yml
+      when:
+        - action | default('inject') == 'restore'
+        - fault | default('') in ['stop-db', 'kill-db', 'stop-mysql', 'kill-mysql']
+
 - name: Fault injection
   hosts: "{{ node | default('none') }}"
   gather_facts: false
@@ -11,6 +23,11 @@
     fault_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports) | map('int') | unique | list }}"
     max_seconds: 600
     fault_kind: "{{ {'stop-mysql': 'stop-db', 'kill-mysql': 'kill-db'}.get(fault, fault) }}"
+    # Manual and Orchestrator strategies only; Galera, Group Replication and Patroni rejoin safely by themselves.
+    fault_guard: "{{ lab_ha_strategy.family == 'replication' and lab_ha_strategy.failover != 'patroni' }}"
+    fault_other_writable: >-
+      {{ groups['db_nodes'] | difference([inventory_hostname]) | map('extract', hostvars) | selectattr('lab_topo', 'defined')
+         | map(attribute='lab_topo') | selectattr('db_up') | rejectattr('read_only') | map(attribute='node') | list }}
   tasks:
     - name: Require confirmation
       ansible.builtin.assert:
@@ -35,11 +52,41 @@
       failed_when: false
       when: fault_kind == 'kill-db' and action | default('inject') == 'inject'
 
+    - name: Leave the database stopped while another node is primary
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} is not started: {{ fault_other_writable | join(', ') }} is writable now.
+          Run make recover NODE={{ inventory_hostname }} to rejoin it as a replica.
+      when:
+        - fault_kind in ['stop-db', 'kill-db'] and action == 'restore'
+        - fault_guard | bool and fault_other_writable | length > 0
+
     - name: Start the database
       ansible.builtin.systemd_service:
         name: "{{ lab_db_service_unit }}"
         state: started
-      when: fault_kind in ['stop-db', 'kill-db'] and action == 'restore'
+      when:
+        - fault_kind in ['stop-db', 'kill-db'] and action == 'restore'
+        - not (fault_guard | bool) or fault_other_writable | length == 0
+
+    # Primaries start read-only; one that is still the only primary (no failover happened) gets its writes back.
+    - name: Make the restarted primary writable again
+      when:
+        - fault_kind in ['stop-db', 'kill-db'] and action == 'restore'
+        - fault_guard | bool and fault_other_writable | length == 0
+      block:
+        - name: Read the restarted node
+          ansible.builtin.include_tasks: ../tasks/topology-facts.yml
+
+        - name: Unfence it
+          ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/failover-unfence.yml"
+          vars:
+            old_primary: "{{ inventory_hostname }}"
+            failover_mode: switchover
+            fo_new_primary: ""
+          when:
+            - lab_topo.db_up and lab_topo.read_only
+            - not (lab_topo.replica.source_host | default(''))
 
     - name: Isolate database traffic (SSH and exporters stay reachable)
       ansible.builtin.shell: |

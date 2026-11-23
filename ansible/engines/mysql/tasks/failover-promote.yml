@@ -6,6 +6,9 @@
     query:
       - STOP REPLICA
       - RESET REPLICA ALL
-      - SET PERSIST super_read_only = OFF
-      - SET PERSIST read_only = OFF
+      # Writable at runtime only; a restart comes back read-only, so a returning old primary is never a second primary.
+      - SET PERSIST_ONLY read_only = ON
+      - SET PERSIST_ONLY super_read_only = ON
+      - SET GLOBAL super_read_only = OFF
+      - SET GLOBAL read_only = OFF
   when: inventory_hostname == fo_new_primary

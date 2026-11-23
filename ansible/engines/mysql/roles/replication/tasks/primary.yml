@@ -7,9 +7,12 @@
   when: replication_status.Is_Replica | default(false)
 
 - name: Make primary writable
-  ansible.mysql.mysql_variables:
+  ansible.mysql.mysql_query:
     login_unix_socket: "{{ replication_socket }}"
-    variable: "{{ item }}"
-    value: "OFF"
-    mode: persist
-  loop: [super_read_only, read_only]
+    query:
+      # Writable at runtime only; a restart comes back read-only, so a returning old primary is never a second primary.
+      - SET PERSIST_ONLY read_only = ON
+      - SET PERSIST_ONLY super_read_only = ON
+      - SET GLOBAL super_read_only = OFF
+      - SET GLOBAL read_only = OFF
+  changed_when: false
