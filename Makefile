@@ -96,11 +96,10 @@ network-matrix: validate-config ## Node-to-node RTT/loss/path matrix (IPERF=1 ad
 	$(ansible) ansible/playbooks/network-matrix.yml $(if $(IPERF),-e iperf=true)
 
 # ---------------------------------------------------------------- HA
-ha: validate-config ## Deploy HA topology: make ha HA=<provider>
-	@[ -n "$(HA)" ] || { echo "usage: make ha HA=<$(HA_PROVIDERS)>"; exit 1; }
-	@echo " $(HA_PROVIDERS) " | grep -q " $(HA) " || { echo "unknown HA provider '$(HA)'. Valid: $(HA_PROVIDERS)"; exit 1; }
-	@cfg="$$(local/scripts/lab-var.sh ha_provider)"; \
-	  [ "$$cfg" = "$(HA)" ] || { echo "HA=$(HA) differs from config/ha.yml ha_provider=$$cfg. Switching topologies needs make destroy and a config change."; exit 1; }
+ha: validate-config ## Deploy HA topology from config/ha.yml ha_provider (HA=<provider> must match it if given)
+	@cfg="$$(local/scripts/lab-var.sh ha_provider)"; ha="$${HA:-$$cfg}"; \
+	  echo " $(HA_PROVIDERS) " | grep -q " $$ha " || { echo "unknown HA provider '$$ha'. Valid: $(HA_PROVIDERS)"; exit 1; }; \
+	  [ "$$cfg" = "$$ha" ] || { echo "HA=$$ha differs from config/ha.yml ha_provider=$$cfg. Switching topologies needs make destroy and a config change."; exit 1; }
 	$(ansible) ansible/playbooks/deploy-ha.yml
 
 topology: validate-config ## Show topology and health
