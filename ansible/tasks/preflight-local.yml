@@ -31,7 +31,7 @@
   ansible.builtin.assert:
     that: item.failed is not defined or not item.failed
     fail_msg: >-
-      {{ item.item }} ({{ lab_node_addresses[item.item] }}, network {{ hostvars[item.item].node_network }}) is not
+      {{ item.item }} ({{ lab_node_addresses[item.item] }}, network {{ hostvars[item.item].node_access_network }}) is not
       reachable on port {{ hostvars[item.item].ansible_port | default(22) }} from this machine. Check routing/VPN
       between this machine and that network.
     quiet: true
@@ -41,8 +41,8 @@
 
 - name: Tailscale ping nodes on tailscale networks
   ansible.builtin.command:
-    argv: [tailscale, ping, --c, "3", --timeout, 5s, "{{ hostvars[item].node_address }}"]
-  loop: "{{ groups['db_nodes'] | map('extract', hostvars) | selectattr('node_network_type', 'equalto', 'tailscale')
+    argv: [tailscale, ping, --c, "3", --timeout, 5s, "{{ hostvars[item].node_access_address }}"]
+  loop: "{{ groups['db_nodes'] | map('extract', hostvars) | selectattr('node_access_network_type', 'equalto', 'tailscale')
             | map(attribute='inventory_hostname') | list }}"
   register: lab_ts_ping
   changed_when: false

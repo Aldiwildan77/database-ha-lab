@@ -171,7 +171,7 @@ class InventoryModule(BaseInventoryPlugin):
         engine_cfg = mysql
         ha_mon = ha.get("monitoring") or {}
 
-        used = {n["_network"] for n in nodes}
+        used = {n["_network"] for n in nodes} | {n["_access_network"] for n in nodes}
         node_cidrs = sorted({c for name in used for c in networks[name]["cidrs"]})
         extra_sources = [str(c) for c in (mon.get("allowed_sources") or [])]
         client_cidrs = sorted(set(node_cidrs) | set(extra_sources))
@@ -273,8 +273,14 @@ class InventoryModule(BaseInventoryPlugin):
 
             net = networks[node["_network"]]
             address = node["_address"]
+            access_net = networks[node["_access_network"]]
             hostvars = {
-                "ansible_host": address,
+                "ansible_host": node["_access_address"],
+                "node_access_address": node["_access_address"],
+                "node_access_network": node["_access_network"],
+                "node_access_network_type": access_net["type"],
+                "node_access_interface": access_net["interface"],
+                "node_access_network_cidrs": access_net["cidrs"],
                 "ansible_user": node_ssh.get("user"),
                 "ansible_port": int(node_ssh.get("port", 22)),
                 "node_name": name,
@@ -443,6 +449,24 @@ class InventoryModule(BaseInventoryPlugin):
                     errors.append(f"{where}: address {fqdn} is outside network '{net_name}' cidrs {net['cidrs']}")
                 elif net and net["type"] == "tailscale" and is_ip(fqdn) and not is_tailscale_ip(fqdn):
                     errors.append(f"{where}: address {fqdn} is not a Tailscale address")
+            # access: how this machine reaches the node (SSH, monitoring, benchmark) when that differs from the
+            # node-to-node address, e.g. nodes on a WireGuard tunnel that this machine reaches over Tailscale.
+            access = node.get("access")
+            node["_access_address"], node["_access_network"] = fqdn, net_name
+            if access is not None:
+                if not isinstance(access, dict) or not access.get("address"):
+                    errors.append(f"{where}: access must be a mapping with an address")
+                else:
+                    a_addr = str(access["address"]).rstrip(".").lower()
+                    a_net_name = str(access.get("network") or net_name)
+                    a_net = networks.get(a_net_name)
+                    if a_net is None:
+                        errors.append(f"{where}: access.network '{a_net_name}' is not defined in networks ({sorted(networks)})")
+                    elif not (is_ip(a_addr) or HOST_RE.match(a_addr)):
+                        errors.append(f"{where}: access.address '{a_addr}' is not a valid hostname or IP address")
+                    elif is_ip(a_addr) and not in_cidrs(a_addr, a_net["cidrs"]):
+                        errors.append(f"{where}: access.address {a_addr} is outside network '{a_net_name}' cidrs {a_net['cidrs']}")
+                    node["_access_address"], node["_access_network"] = a_addr, a_net_name
                 if fqdn in fqdns:
                     errors.append(f"{where}: duplicate address '{fqdn}'")
                 fqdns.add(fqdn)

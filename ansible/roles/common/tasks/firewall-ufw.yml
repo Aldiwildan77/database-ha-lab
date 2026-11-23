@@ -8,10 +8,10 @@
     comment: ha-lab ssh
   when: common_firewall_ssh_allow_all_interfaces | bool
 
-- name: Allow SSH on the lab interface
+- name: Allow SSH on the access interface
   community.general.ufw:
     rule: allow
-    interface: "{{ node_interface }}"
+    interface: "{{ node_access_interface | default(node_interface) }}"
     direction: in
     port: "{{ ansible_port | default(22) | string }}"
     proto: tcp
@@ -24,29 +24,29 @@
     port: "41641"
     proto: udp
     comment: tailscale
-  when: node_network_type == 'tailscale'
+  when: node_network_type == 'tailscale' or node_access_network_type | default('') == 'tailscale'
 
 - name: Allow lab ports from permitted sources
   community.general.ufw:
     rule: allow
-    interface: "{{ node_interface }}"
+    interface: "{{ item.2 }}"
     direction: in
     from_ip: "{{ item.0 }}"
     to_port: "{{ item.1 | string }}"
     proto: tcp
     comment: ha-lab
-  loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports) | list }}"
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_tcp_ports, common_firewall_interfaces) | list }}"
 
 - name: Allow lab UDP ports from permitted sources
   community.general.ufw:
     rule: allow
-    interface: "{{ node_interface }}"
+    interface: "{{ item.2 }}"
     direction: in
     from_ip: "{{ item.0 }}"
     to_port: "{{ item.1 | string }}"
     proto: udp
     comment: ha-lab
-  loop: "{{ common_firewall_allowed_sources | product(common_firewall_udp_ports) | list }}"
+  loop: "{{ common_firewall_allowed_sources | product(common_firewall_udp_ports, common_firewall_interfaces) | list }}"
 
 - name: Enable firewall with default deny incoming
   community.general.ufw:

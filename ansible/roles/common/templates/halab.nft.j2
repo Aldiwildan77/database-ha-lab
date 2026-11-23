@@ -34,10 +34,10 @@ table inet halab {
   chain lab_ports {
     ct state established,related accept
 {% if v4 %}
-    iifname "{{ node_interface }}" ip saddr @allowed_v4 accept
+    iifname { {{ common_firewall_interfaces | map('to_json') | join(', ') }} } ip saddr @allowed_v4 accept
 {% endif %}
 {% if v6 %}
-    iifname "{{ node_interface }}" ip6 saddr @allowed_v6 accept
+    iifname { {{ common_firewall_interfaces | map('to_json') | join(', ') }} } ip6 saddr @allowed_v6 accept
 {% endif %}
     counter drop
   }

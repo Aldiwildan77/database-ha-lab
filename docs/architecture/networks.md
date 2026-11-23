@@ -77,3 +77,20 @@ Two warnings:
 3. **This machine → every node:** the client ports (the database port, plus Router 16446/16447 for InnoDB Cluster) and the monitoring ports (19100, the exporter 19104 or 19187, 19106).
 
 These are the lab's default ports. They deliberately differ from each product's standard port, and all are configurable in `config/ha.yml`; see [foundation.md](foundation.md#ports).
+
+## Node-to-node network differs from the operator's
+
+When nodes talk over one network (for example a WireGuard tunnel, `type: vpn`) that this machine cannot reach, give each node an `access` address on a network this machine can reach:
+
+```yaml
+networks:
+  wg: {type: vpn, interface: wg-lab, cidrs: [10.99.0.0/24]}
+  tailnet: {type: tailscale}
+nodes:
+  - name: db-01
+    address: 10.99.0.1                                   # replication, failover, mesh check
+    network: wg
+    access: {address: 100.108.211.29, network: tailnet}  # SSH, Prometheus, JMeter
+```
+
+Ansible connects to the access address; Prometheus targets, probes and benchmark endpoints use it too. The firewall opens the lab ports on both interfaces, to the sources of every network in use. The lab does not create the VPN.

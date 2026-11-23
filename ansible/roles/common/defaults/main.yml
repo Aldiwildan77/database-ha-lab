@@ -25,6 +25,8 @@ common_nft_file: /etc/halab/halab.nft
 common_firewall_ssh_allow_all_interfaces: "{{ (lab_monitoring.firewall | default({})).ssh_allow_all_interfaces | default(true) }}"
 # Every node network's cidrs plus monitoring.yml allowed_sources (computed by the inventory plugin).
 common_firewall_allowed_sources: "{{ lab_allowed_sources }}"
+# Node-to-node interface, plus the one this machine reaches the node on when access uses another network.
+common_firewall_interfaces: "{{ [node_interface, node_access_interface | default(node_interface)] | unique }}"
 common_firewall_extra_ports: []
 common_firewall_iperf_port: "{{ lab_iperf_port }}"
 common_firewall_tcp_ports: >-

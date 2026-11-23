@@ -18,8 +18,8 @@
         addrs = sorted({i[4][0] for i in infos}, key=lambda a: (":" in a, a))
         inside = [a for a in addrs if any(ipaddress.ip_address(a) in n for n in nets)]
         print(json.dumps({"addresses": addrs, "in_network": inside}))
-      - "{{ hostvars[item].node_address }}"
-      - "{{ hostvars[item].node_network_cidrs | to_json }}"
+      - "{{ hostvars[item].node_access_address }}"
+      - "{{ hostvars[item].node_access_network_cidrs | to_json }}"
   loop: "{{ groups['db_nodes'] }}"
   register: lab_dns
   changed_when: false
@@ -32,12 +32,13 @@
   ansible.builtin.assert:
     that:
       - lab_node_dns[item].in_network | length > 0
-      - hostvars[item].node_tailscale_ip == '' or hostvars[item].node_tailscale_ip in lab_node_dns[item].in_network
+      - hostvars[item].node_tailscale_ip == '' or hostvars[item].node_access_address != hostvars[item].node_address
+        or hostvars[item].node_tailscale_ip in lab_node_dns[item].in_network
     fail_msg: >-
-      {{ hostvars[item].node_address }} ({{ item }}, network {{ hostvars[item].node_network }}) resolved to
+      {{ hostvars[item].node_access_address }} ({{ item }}, network {{ hostvars[item].node_access_network }}) resolved to
       {{ lab_node_dns[item].error | default(lab_node_dns[item].addresses) }}; expected an address in
-      {{ hostvars[item].node_network_cidrs }}{{ (' matching tailscale_ip ' ~ hostvars[item].node_tailscale_ip) if hostvars[item].node_tailscale_ip else '' }}.
-      {{ 'Check MagicDNS and that the node is online (tailscale status).' if hostvars[item].node_network_type == 'tailscale'
+      {{ hostvars[item].node_access_network_cidrs }}{{ (' matching tailscale_ip ' ~ hostvars[item].node_tailscale_ip) if hostvars[item].node_tailscale_ip else '' }}.
+      {{ 'Check MagicDNS and that the node is online (tailscale status).' if hostvars[item].node_access_network_type == 'tailscale'
          else 'Check DNS/hosts entries on this machine or use the IP address.' }}
     quiet: true
   loop: "{{ groups['db_nodes'] }}"
@@ -48,9 +49,10 @@
       {%- set out = {} -%}
       {%- for n in groups['db_nodes'] -%}
       {%- if (lab_monitoring.scrape_address | default('ip')) == 'fqdn' -%}
-      {%- set _ = out.update({n: hostvars[n].node_address}) -%}
+      {%- set _ = out.update({n: hostvars[n].node_access_address}) -%}
       {%- else -%}
-      {%- set _ = out.update({n: hostvars[n].node_tailscale_ip or lab_node_dns[n].in_network[0]}) -%}
+      {%- set _ = out.update({n: (hostvars[n].node_tailscale_ip if hostvars[n].node_access_address == hostvars[n].node_address else '')
+                                  or lab_node_dns[n].in_network[0]}) -%}
       {%- endif -%}
       {%- endfor -%}
       {{ out }}
