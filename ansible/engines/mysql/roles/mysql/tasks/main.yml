@@ -67,6 +67,14 @@
     force: false
     content: "[mysqld]\nport = {{ mysql_port }}\nmysqlx = OFF\n"
 
+# Before install, so a host left half-installed by a failed run is still recognised as the lab's.
+- name: Mark datadir as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ mysql_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+
 - name: Install MySQL
   ansible.builtin.apt:
     name: "{{ mysql_packages }}"
@@ -79,13 +87,6 @@
     dest: "{{ mysql_config_file }}"
     mode: "0644"
   notify: Restart mysql
-
-- name: Mark datadir as lab-managed
-  ansible.builtin.copy:
-    dest: "{{ mysql_marker_file }}"
-    mode: "0644"
-    force: false
-    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
 
 - name: Start MySQL
   ansible.builtin.service:

@@ -53,6 +53,14 @@
     force: false
     content: "[mariadbd]\nport = {{ mysql_port }}\n"
 
+# Before install, so a host left half-installed by a failed run is still recognised as the lab's.
+- name: Mark datadir as lab-managed
+  ansible.builtin.copy:
+    dest: "{{ mariadb_marker_file }}"
+    mode: "0644"
+    force: false
+    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
+
 - name: Install MariaDB
   ansible.builtin.apt:
     name: "{{ mariadb_packages }}"
@@ -103,13 +111,6 @@
     dest: "{{ mariadb_config_file }}"
     mode: "0644"
   notify: Restart mariadb
-
-- name: Mark datadir as lab-managed
-  ansible.builtin.copy:
-    dest: "{{ mariadb_marker_file }}"
-    mode: "0644"
-    force: false
-    content: "Managed by database-ha-lab. Provisioned {{ ansible_date_time.iso8601 }}\n"
 
 - name: Start MariaDB
   ansible.builtin.service:
