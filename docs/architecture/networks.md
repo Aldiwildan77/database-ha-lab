@@ -78,19 +78,28 @@ Two warnings:
 
 These are the lab's default ports. They deliberately differ from each product's standard port, and all are configurable in `config/ha.yml`; see [foundation.md](foundation.md#ports).
 
-## Node-to-node network differs from the operator's
+## Several networks per node
 
-A node can sit on several networks. `network` + `address` is the path nodes use to reach each other; `ssh.host` is the path this machine uses (SSH, Prometheus, probes, JMeter). The network of `ssh.host` is `ssh.network`, else the network whose `cidrs` contain it, else the node's own network.
+A node can sit on several networks. Each network carries one kind of traffic:
+
+| Setting | Traffic | Default |
+|---|---|---|
+| `environment.network`, per node `network` | node <-> node: replication, failover, Galera/etcd, mesh check | the only network, when there is one |
+| `environment.operator_network`, per node `operator_network` | this machine -> node: SSH, Prometheus, probes, JMeter | `network` |
+
+`addresses` maps each network to the node's address on it; `address` is the short form for one network.
 
 ```yaml
+environment: {name: lab, network: wg, operator_network: tailnet}
 networks:
   wg: {type: vpn, interface: wg-lab, cidrs: [10.99.0.0/24]}
   tailnet: {type: tailscale}
 nodes:
   - name: db-01
-    address: 10.99.0.1          # replication, failover, mesh check (network wg)
-    network: wg
-    ssh: {host: 100.108.211.29, user: lab1}   # this machine -> node (network tailnet, from its cidrs)
+    addresses: {wg: 10.99.0.1, tailnet: 100.108.211.29}
+    ssh: {user: lab1}
 ```
 
-The firewall opens the lab ports on both interfaces, to the sources of every network in use. Network types only set defaults (interface, cidrs, encryption); the lab does not create the VPN. Reachability is checked with TCP on every network type; Tailscale-specific checks only warn.
+`ssh` holds credentials only (`user`, `port`, `private_key`, `proxy_jump` for a bastion, `become_password_env`). The firewall opens the lab ports on the node-network and operator-network interfaces. Network types only set defaults (interface, cidrs, encryption); the lab does not create VPNs.
+
+Not supported: different node-to-node paths per pair of nodes, and NAT/port mapping between nodes. Galera, Group Replication, Patroni, etcd and Orchestrator advertise one address and port per node to every peer; put the nodes on one overlay network (WireGuard, Tailscale) instead.

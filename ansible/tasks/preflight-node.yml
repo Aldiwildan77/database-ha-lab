@@ -72,12 +72,24 @@
   changed_when: false
   failed_when: node_peer_dns.rc != 0
 
-- name: Check every peer is reachable from this node (SSH port)
+# Informational: nodes never SSH to each other and sshd may not listen on the node network.
+# make mesh-check tests the real lab ports between nodes.
+- name: Check every peer answers on the SSH port from this node
   ansible.builtin.wait_for:
     host: "{{ hostvars[item].node_address }}"
-    port: "{{ hostvars[item].ansible_port | default(22) }}"
-    timeout: 30
+    port: 22
+    timeout: 10
   loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) }}"
+  register: node_peer_ssh
+  failed_when: false
+
+- name: Warn about peers not answering on the SSH port
+  ansible.builtin.debug:
+    msg: "WARNING: {{ item.item }} ({{ hostvars[item.item].node_address }}) does not answer on port 22 from {{ inventory_hostname }}; make mesh-check tests the lab ports."
+  when: item.failed | default(false)
+  loop: "{{ node_peer_ssh.results }}"
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Read clock synchronisation state
   ansible.builtin.command: timedatectl show --property=NTPSynchronized --value

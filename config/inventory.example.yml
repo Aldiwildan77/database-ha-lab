@@ -2,7 +2,8 @@
 # Copy to config/inventory.yml (make init).
 environment:
   name: lab
-  network: tailnet          # default network for nodes that do not set one
+  network: tailnet          # node <-> node network (replication, failover); a node can override with network:
+  # operator_network: tailnet   # this machine -> nodes (SSH, monitoring, benchmark); default: network
 
 # Networks the nodes are reachable on. Types:
 #   tailscale - interface tailscale0, Tailscale ranges; Tailscale must run on node and this machine
@@ -23,11 +24,10 @@ networks:
   #   cidrs: [10.99.0.0/24]
 
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
-# address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
-# ssh: user (required), port, private_key (omit to use ssh-agent / Tailscale SSH), become_password_env,
-#   host: address this machine uses (SSH, monitoring, benchmark) when it differs from address; its network is
-#   ssh.network, else the network whose cidrs contain it.
-# Optional per node: network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}).
+# address: hostname or IP on the node's network (one network), or
+# addresses: {network: address} when the node is on several networks (node network + operator network).
+# ssh: user (required), port, private_key (omit to use ssh-agent / Tailscale SSH), proxy_jump, become_password_env.
+# Optional per node: network, operator_network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}).
 nodes:
   - name: db-01
     address: db-01.example.ts.net
@@ -49,10 +49,11 @@ nodes:
     # network: dc-lan
     # address: 10.20.0.13
 
-  # Nodes replicate over wg; this machine reaches them over the tailnet (ssh.host).
+  # Replicates over wg; this machine reaches it over the tailnet.
   # - name: db-04
   #   network: wg
-  #   address: 10.99.0.4
+  #   operator_network: tailnet
+  #   addresses: {wg: 10.99.0.4, tailnet: 100.101.102.104}
   #   role: replica
   #   datacenter: dc-04
-  #   ssh: {host: 100.101.102.104, user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}
+  #   ssh: {user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}

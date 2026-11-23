@@ -301,6 +301,8 @@ class InventoryModule(BaseInventoryPlugin):
             }
             if node_ssh.get("private_key"):
                 hostvars["ansible_ssh_private_key_file"] = os.path.expanduser(node_ssh["private_key"])
+            if node_ssh.get("proxy_jump"):
+                hostvars["ansible_ssh_common_args"] = f"-o ProxyJump={node_ssh['proxy_jump']}"
             if node_ssh.get("become_password_env"):
                 hostvars["ansible_become_password"] = os.environ.get(node_ssh["become_password_env"], "")
             for k, v in hostvars.items():
@@ -398,6 +400,10 @@ class InventoryModule(BaseInventoryPlugin):
         default_net = env.get("network")
         if default_net is None and len(networks) == 1:
             default_net = next(iter(networks))
+        default_operator_net = env.get("operator_network")
+        if default_operator_net is not None and networks and default_operator_net not in networks:
+            errors.append(f"inventory.yml: environment.operator_network '{default_operator_net}' is not defined in networks "
+                          f"({sorted(networks)})")
         if default_net is not None and networks and default_net not in networks:
             errors.append(f"inventory.yml: environment.network '{default_net}' is not defined in networks "
                           f"({sorted(networks)})")
@@ -422,8 +428,10 @@ class InventoryModule(BaseInventoryPlugin):
             for field in ("name", "role", "datacenter"):
                 if not node.get(field):
                     errors.append(f"{where}.{field} is required")
-            if not (node.get("address") or node.get("fqdn")):
-                errors.append(f"{where}.address is required (hostname, MagicDNS name or IP; 'fqdn' also accepted)")
+            if not (node.get("address") or node.get("fqdn") or node.get("addresses")):
+                errors.append(f"{where}: address (one network) or addresses ({{network: address}}) is required")
+            if node.get("addresses") is not None and not isinstance(node.get("addresses"), dict):
+                errors.append(f"{where}: addresses must be a mapping of network name to address")
             name = str(node.get("name", ""))
             where = f"inventory.yml: node '{name or i}'"
             if name:
@@ -439,7 +447,17 @@ class InventoryModule(BaseInventoryPlugin):
             elif net is None:
                 errors.append(f"{where}: network '{net_name}' is not defined in networks ({sorted(networks)})")
             node["_network"] = net_name
-            fqdn = str(node.get("address") or node.get("fqdn") or "").rstrip(".").lower()
+            # addresses: {network: address}; address is the short form for the node's own network.
+            addrs = {str(k): str(v).rstrip(".").lower() for k, v in (node.get("addresses") or {}).items()}
+            for a_net in addrs:
+                if a_net not in networks:
+                    errors.append(f"{where}: addresses.{a_net} is not a network defined in networks ({sorted(networks)})")
+            if node.get("address") or node.get("fqdn"):
+                addrs.setdefault(net_name, str(node.get("address") or node.get("fqdn")).rstrip(".").lower())
+            node["_addresses"] = addrs
+            if net_name and addrs and net_name not in addrs:
+                errors.append(f"{where}: no address on network '{net_name}' (node-to-node network); add addresses.{net_name}")
+            fqdn = addrs.get(net_name, "")
             node["_address"] = fqdn
             if fqdn:
                 if not (is_ip(fqdn) or HOST_RE.match(fqdn)):
@@ -451,25 +469,20 @@ class InventoryModule(BaseInventoryPlugin):
                 if fqdn in fqdns:
                     errors.append(f"{where}: duplicate address '{fqdn}'")
                 fqdns.add(fqdn)
-            # ssh.host: how this machine reaches the node (SSH, monitoring, benchmark) when that differs from the
-            # node-to-node address. Its network is ssh.network, else the network whose cidrs contain ssh.host,
-            # else the node's own network.
-            node["_access_address"], node["_access_network"] = fqdn, net_name
-            node_ssh_cfg = node.get("ssh") if isinstance(node.get("ssh"), dict) else {}
-            if node_ssh_cfg.get("host"):
-                a_addr = str(node_ssh_cfg["host"]).rstrip(".").lower()
-                a_net_name = str(node_ssh_cfg.get("network") or "")
-                if not a_net_name and is_ip(a_addr):
-                    a_net_name = next((n for n, v in networks.items() if v["cidrs"] and in_cidrs(a_addr, v["cidrs"])), "")
-                a_net_name = a_net_name or net_name
-                a_net = networks.get(a_net_name)
+            # operator_network: the network this machine uses to reach the node (SSH, monitoring, benchmark).
+            op_net = str(node.get("operator_network") or default_operator_net or net_name)
+            node["_access_network"], node["_access_address"] = op_net, addrs.get(op_net, "")
+            if op_net not in networks:
+                errors.append(f"{where}: operator_network '{op_net}' is not defined in networks ({sorted(networks)})")
+            elif not node["_access_address"]:
+                errors.append(f"{where}: no address on operator network '{op_net}'; add addresses.{op_net}")
+            for a_net, a_addr in addrs.items():
+                if a_net == net_name or a_net not in networks:
+                    continue
                 if not (is_ip(a_addr) or HOST_RE.match(a_addr)):
-                    errors.append(f"{where}: ssh.host '{a_addr}' is not a valid hostname or IP address")
-                elif a_net is None:
-                    errors.append(f"{where}: ssh.network '{a_net_name}' is not defined in networks ({sorted(networks)})")
-                elif node_ssh_cfg.get("network") and is_ip(a_addr) and a_net["cidrs"] and not in_cidrs(a_addr, a_net["cidrs"]):
-                    errors.append(f"{where}: ssh.host {a_addr} is outside network '{a_net_name}' cidrs {a_net['cidrs']}")
-                node["_access_address"], node["_access_network"] = a_addr, a_net_name
+                    errors.append(f"{where}: addresses.{a_net} '{a_addr}' is not a valid hostname or IP address")
+                elif is_ip(a_addr) and networks[a_net]["cidrs"] and not in_cidrs(a_addr, networks[a_net]["cidrs"]):
+                    errors.append(f"{where}: addresses.{a_net} {a_addr} is outside network '{a_net}' cidrs {networks[a_net]['cidrs']}")
             role = node.get("role")
             if role and role not in NODE_ROLES:
                 errors.append(f"{where}: role '{role}' must be one of {sorted(NODE_ROLES)}")
