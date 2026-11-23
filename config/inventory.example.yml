@@ -17,6 +17,10 @@ networks:
   #   type: private
   #   interface: eth1          # interface carrying lab traffic (firewall, faults, PXC address)
   #   cidrs: [10.20.0.0/16]    # subnet(s) of that network; also used for database account host patterns
+  # wg:
+  #   type: vpn
+  #   interface: wg-lab
+  #   cidrs: [10.99.0.0/24]
 
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
 # address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
@@ -44,3 +48,11 @@ nodes:
     datacenter: dc-03
     # network: dc-lan
     # address: 10.20.0.13
+
+  # Nodes replicate over wg; this machine reaches them over the tailnet (ssh.host).
+  # - name: db-04
+  #   network: wg
+  #   address: 10.99.0.4
+  #   role: replica
+  #   datacenter: dc-04
+  #   ssh: {host: 100.101.102.104, user: db-ha-lab, private_key: ~/.ssh/db-ha-lab_ed25519}
