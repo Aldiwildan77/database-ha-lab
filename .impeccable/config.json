@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "docs/manuals/manual.html"
+        ],
+        "createdAt": "2026-11-23T04:12:08.925Z",
+        "reason": "Claude: print-manual callouts follow the GitHub alert convention; user asked for colored warning boxes"
+      }
+    ]
+  }
+}
