@@ -8,6 +8,7 @@ environment:
 #   tailscale - interface tailscale0, Tailscale ranges; Tailscale must run on node and this machine
 #   vpn       - WireGuard/OpenVPN/IPsec you manage; treated as encrypted
 #   private   - plain internal network; the lab enforces TLS for replication, clients and Galera
+#   direct    - any other plain routed network (LAN, public IPs); same as private
 # Mixed networks work when every node can reach every other node and this machine reaches every node.
 networks:
   tailnet:
@@ -19,9 +20,9 @@ networks:
 
 # role: primary | replica. Exactly one primary (initial primary / bootstrap node).
 # address: MagicDNS name, hostname or IP reachable from this machine and from every other node.
-# ssh: user (required), port, private_key (omit to use ssh-agent / Tailscale SSH), become_password_env.
-# access: {address, network} - how this machine reaches the node (SSH, monitoring, benchmark) when it differs
-#   from address, e.g. nodes on a WireGuard network that this machine reaches over Tailscale.
+# ssh: user (required), port, private_key (omit to use ssh-agent / Tailscale SSH), become_password_env,
+#   host: address this machine uses (SSH, monitoring, benchmark) when it differs from address; its network is
+#   ssh.network, else the network whose cidrs contain it.
 # Optional per node: network, server_id, tailscale_ip, the engine's section (mysql:, mariadb: or postgres: {server option: value}).
 nodes:
   - name: db-01

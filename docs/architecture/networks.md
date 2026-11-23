@@ -80,7 +80,7 @@ These are the lab's default ports. They deliberately differ from each product's 
 
 ## Node-to-node network differs from the operator's
 
-When nodes talk over one network (for example a WireGuard tunnel, `type: vpn`) that this machine cannot reach, give each node an `access` address on a network this machine can reach:
+A node can sit on several networks. `network` + `address` is the path nodes use to reach each other; `ssh.host` is the path this machine uses (SSH, Prometheus, probes, JMeter). The network of `ssh.host` is `ssh.network`, else the network whose `cidrs` contain it, else the node's own network.
 
 ```yaml
 networks:
@@ -88,9 +88,9 @@ networks:
   tailnet: {type: tailscale}
 nodes:
   - name: db-01
-    address: 10.99.0.1                                   # replication, failover, mesh check
+    address: 10.99.0.1          # replication, failover, mesh check (network wg)
     network: wg
-    access: {address: 100.108.211.29, network: tailnet}  # SSH, Prometheus, JMeter
+    ssh: {host: 100.108.211.29, user: lab1}   # this machine -> node (network tailnet, from its cidrs)
 ```
 
-Ansible connects to the access address; Prometheus targets, probes and benchmark endpoints use it too. The firewall opens the lab ports on both interfaces, to the sources of every network in use. The lab does not create the VPN.
+The firewall opens the lab ports on both interfaces, to the sources of every network in use. Network types only set defaults (interface, cidrs, encryption); the lab does not create the VPN. Reachability is checked with TCP on every network type; Tailscale-specific checks only warn.

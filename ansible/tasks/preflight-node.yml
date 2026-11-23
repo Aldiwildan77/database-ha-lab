@@ -18,14 +18,12 @@
   failed_when: false
   when: node_network_type == 'tailscale'
 
-- name: Assert Tailscale is running on the node
-  ansible.builtin.assert:
-    that:
-      - node_ts.rc == 0
-      - (node_ts.stdout | from_json).BackendState == 'Running'
-    fail_msg: "Tailscale is not running on {{ inventory_hostname }} (network {{ node_network }} is type tailscale)"
-    quiet: true
-  when: node_network_type == 'tailscale'
+- name: Warn when Tailscale is not running on the node
+  ansible.builtin.debug:
+    msg: "WARNING: Tailscale is not running on {{ inventory_hostname }} (network {{ node_network }} is type tailscale)"
+  when:
+    - node_network_type == 'tailscale'
+    - node_ts.rc != 0 or (node_ts.stdout | from_json).BackendState != 'Running'
 
 - name: Find the node's address on its lab network
   ansible.builtin.command:

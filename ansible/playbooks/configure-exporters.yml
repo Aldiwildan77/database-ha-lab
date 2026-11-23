@@ -20,7 +20,7 @@
       ansible.builtin.include_role:
         name: lab-collector
 
-- name: Verify exporters from this machine over Tailscale
+- name: Verify exporters from this machine
   hosts: localhost
   connection: local
   gather_facts: false

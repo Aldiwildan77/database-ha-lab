@@ -73,7 +73,7 @@
       {%- if missing -%}
       {%- set _ = p.append('Ansible collections missing (' ~ missing | join(', ') ~ '): run make deps') -%}
       {%- endif -%}
-      {%- for tool in ['python3', 'tailscale', 'curl', 'openssl', 'nc', 'ping', 'make'] -%}
+      {%- for tool in ['python3', 'curl', 'openssl', 'nc', 'ping', 'make'] + (['tailscale'] if lab_uses_tailscale | default(false) | bool else []) -%}
       {%- if not t[tool].path -%}{%- set _ = p.append(tool ~ ' not found in PATH') -%}{%- endif -%}
       {%- endfor -%}
       {%- if t.python3.version and t.python3.version[:2] < [3, 9] -%}

@@ -6,14 +6,13 @@
   failed_when: false
   when: lab_uses_tailscale | bool
 
-- name: Assert this machine is connected to Tailscale
-  ansible.builtin.assert:
-    that:
-      - lab_ts_local.rc == 0
-      - (lab_ts_local.stdout | from_json).BackendState == 'Running'
-    fail_msg: "Tailscale is not running on this machine (nodes on a tailscale network need it): {{ lab_ts_local.stderr | default('') | trim }}"
-    quiet: true
-  when: lab_uses_tailscale | bool
+# Informational only: reachability is decided by the TCP checks below, whatever the network.
+- name: Warn when Tailscale is not running on this machine
+  ansible.builtin.debug:
+    msg: "WARNING: Tailscale is not running on this machine: {{ lab_ts_local.stderr | default('') | trim }}"
+  when:
+    - lab_uses_tailscale | bool
+    - lab_ts_local.rc != 0 or (lab_ts_local.stdout | from_json).BackendState != 'Running'
 
 - name: Resolve node addresses
   ansible.builtin.import_tasks: resolve-node-addresses.yml
@@ -48,11 +47,10 @@
   changed_when: false
   failed_when: false
 
-- name: Assert tailscale nodes answer tailscale ping
-  ansible.builtin.assert:
-    that: item.stdout is search('pong from')
-    fail_msg: "{{ item.item }} did not answer tailscale ping: {{ (item.stdout ~ ' ' ~ item.stderr) | trim }}"
-    quiet: true
+- name: Warn about nodes that do not answer tailscale ping
+  ansible.builtin.debug:
+    msg: "WARNING: {{ item.item }} did not answer tailscale ping: {{ (item.stdout ~ ' ' ~ item.stderr) | trim }}"
+  when: item.stdout is not search('pong from')
   loop: "{{ lab_ts_ping.results }}"
   loop_control:
     label: "{{ item.item }}"

@@ -54,6 +54,7 @@ NETWORK_TYPES = {
     "tailscale": ("tailscale0", TAILSCALE_CIDRS, True),
     "vpn": (None, None, True),        # WireGuard/OpenVPN/IPsec managed outside the lab
     "private": (None, None, False),   # plain internal network: TLS is enforced by the lab
+    "direct": (None, None, False),    # plain routed network (LAN, public IPs): TLS is enforced by the lab
 }
 
 
@@ -447,29 +448,28 @@ class InventoryModule(BaseInventoryPlugin):
                     errors.append(f"{where}: address '{fqdn}' is still the example value")
                 elif net and is_ip(fqdn) and not in_cidrs(fqdn, net["cidrs"]):
                     errors.append(f"{where}: address {fqdn} is outside network '{net_name}' cidrs {net['cidrs']}")
-                elif net and net["type"] == "tailscale" and is_ip(fqdn) and not is_tailscale_ip(fqdn):
-                    errors.append(f"{where}: address {fqdn} is not a Tailscale address")
-            # access: how this machine reaches the node (SSH, monitoring, benchmark) when that differs from the
-            # node-to-node address, e.g. nodes on a WireGuard tunnel that this machine reaches over Tailscale.
-            access = node.get("access")
-            node["_access_address"], node["_access_network"] = fqdn, net_name
-            if access is not None:
-                if not isinstance(access, dict) or not access.get("address"):
-                    errors.append(f"{where}: access must be a mapping with an address")
-                else:
-                    a_addr = str(access["address"]).rstrip(".").lower()
-                    a_net_name = str(access.get("network") or net_name)
-                    a_net = networks.get(a_net_name)
-                    if a_net is None:
-                        errors.append(f"{where}: access.network '{a_net_name}' is not defined in networks ({sorted(networks)})")
-                    elif not (is_ip(a_addr) or HOST_RE.match(a_addr)):
-                        errors.append(f"{where}: access.address '{a_addr}' is not a valid hostname or IP address")
-                    elif is_ip(a_addr) and not in_cidrs(a_addr, a_net["cidrs"]):
-                        errors.append(f"{where}: access.address {a_addr} is outside network '{a_net_name}' cidrs {a_net['cidrs']}")
-                    node["_access_address"], node["_access_network"] = a_addr, a_net_name
                 if fqdn in fqdns:
                     errors.append(f"{where}: duplicate address '{fqdn}'")
                 fqdns.add(fqdn)
+            # ssh.host: how this machine reaches the node (SSH, monitoring, benchmark) when that differs from the
+            # node-to-node address. Its network is ssh.network, else the network whose cidrs contain ssh.host,
+            # else the node's own network.
+            node["_access_address"], node["_access_network"] = fqdn, net_name
+            node_ssh_cfg = node.get("ssh") if isinstance(node.get("ssh"), dict) else {}
+            if node_ssh_cfg.get("host"):
+                a_addr = str(node_ssh_cfg["host"]).rstrip(".").lower()
+                a_net_name = str(node_ssh_cfg.get("network") or "")
+                if not a_net_name and is_ip(a_addr):
+                    a_net_name = next((n for n, v in networks.items() if v["cidrs"] and in_cidrs(a_addr, v["cidrs"])), "")
+                a_net_name = a_net_name or net_name
+                a_net = networks.get(a_net_name)
+                if not (is_ip(a_addr) or HOST_RE.match(a_addr)):
+                    errors.append(f"{where}: ssh.host '{a_addr}' is not a valid hostname or IP address")
+                elif a_net is None:
+                    errors.append(f"{where}: ssh.network '{a_net_name}' is not defined in networks ({sorted(networks)})")
+                elif node_ssh_cfg.get("network") and is_ip(a_addr) and a_net["cidrs"] and not in_cidrs(a_addr, a_net["cidrs"]):
+                    errors.append(f"{where}: ssh.host {a_addr} is outside network '{a_net_name}' cidrs {a_net['cidrs']}")
+                node["_access_address"], node["_access_network"] = a_addr, a_net_name
             role = node.get("role")
             if role and role not in NODE_ROLES:
                 errors.append(f"{where}: role '{role}' must be one of {sorted(NODE_ROLES)}")
