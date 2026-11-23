@@ -75,7 +75,7 @@ def md(text):
 
 
 def kv_table(pairs):
-    return "<table>" + "".join(f"<tr><th>{html.escape(str(k))}</th><td>{html.escape(str(v))}</td></tr>"
+    return "<table class='kv'>" + "".join(f"<tr><th>{html.escape(str(k))}</th><td>{html.escape(str(v))}</td></tr>"
                                for k, v in pairs) + "</table>"
 
 
@@ -235,26 +235,27 @@ def main():
     title = f"{ {'mysql': 'MySQL', 'mariadb': 'MariaDB', 'postgresql': 'PostgreSQL'}.get(db, db)} {dbv}"
     doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>{e(stem)}</title><style>
 @page {{ size: A4; margin: 16mm 14mm 18mm; }}
-:root {{ --ink: #1b2430; --muted: #5b6573; --accent: #1f5fae; --accent-soft: #e8f0fb; --rule: #d5dbe3;
-        --good: #1e8e3e; --good-soft: #e6f4ea; --warn: #b26a00; --warn-soft: #fff4e0; --bad: #c5221f; --bad-soft: #fce8e6; }}
+:root {{ --ink: #1a1a1a; --muted: #6b6b6b; --accent: #f26a1b; --accent-soft: #fff0e5; --rule: #dcdcdc; --dark: #1c1c1c;
+        --good: #1e8e3e; --good-soft: #e6f4ea; --warn: #9a6a00; --warn-soft: #fff8db; --bad: #c5221f; --bad-soft: #fce8e6; }}
 body {{ font: 10pt/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); }}
 .cover {{ height: 255mm; display: flex; flex-direction: column; justify-content: space-between; }}
-.band {{ background: var(--accent); color: #fff; padding: 22mm 14mm 14mm; margin: -16mm -14mm 0; width: calc(100% + 28mm); box-sizing: border-box; }}
-.band .sub {{ font-size: 17pt; font-weight: 600; opacity: 1; margin-bottom: 8pt; }}
-.band .k {{ text-transform: uppercase; letter-spacing: .14em; font-size: 9pt; opacity: .85; }}
+.band {{ background: var(--dark); border-bottom: 6pt solid var(--accent); color: #fff; padding: 22mm 14mm 14mm; margin: -16mm -14mm 0; width: calc(100% + 28mm); box-sizing: border-box; }}
+.band .sub {{ font-size: 17pt; font-weight: 600; color: var(--accent); margin-bottom: 8pt; }}
+.band .k {{ text-transform: uppercase; letter-spacing: .14em; font-size: 9pt; color: var(--accent); font-weight: 700; }}
 .band h1 {{ font-size: 28pt; margin: 6pt 0 4pt; border: 0; color: #fff; padding: 0; }}
 .band p {{ margin: 2pt 0; font-size: 12pt; opacity: .95; }}
 .meta {{ margin-top: 14mm; }} .meta td, .meta th {{ border: 0; border-bottom: 1px solid var(--rule); font-size: 10pt; padding: 5pt 4pt; }}
-.meta th {{ background: none; color: var(--muted); width: 32%; font-weight: 500; }}
+.meta th {{ background: none; color: var(--accent); width: 32%; font-weight: 500; }}
 .credit {{ border-left: 4px solid var(--accent); padding: 4pt 0 4pt 10pt; color: var(--muted); font-size: 11pt; }}
 .credit .who {{ color: var(--ink); font-weight: 700; font-size: 13pt; }}
-h1 {{ font-size: 17pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 3pt; margin-top: 0; }}
+h1 {{ font-size: 17pt; color: var(--ink); border-bottom: 3px solid var(--accent); padding-bottom: 3pt; margin-top: 0; }}
 h2 {{ font-size: 13.5pt; margin: 14pt 0 6pt; color: var(--ink); }} h3, h4 {{ font-size: 11pt; margin: 12pt 0 4pt; color: var(--accent); }}
-h2.dash {{ background: var(--accent-soft); border-left: 4px solid var(--accent); padding: 4pt 8pt; margin-top: 0; }}
+h2.dash {{ background: var(--dark); color: #fff; border-left: 6px solid var(--accent); padding: 4pt 8pt; margin-top: 0; }}
 .pb {{ break-before: page; }}
 table {{ border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 8.5pt; }}
 th, td {{ border: 1px solid var(--rule); padding: 3pt 5pt; text-align: left; vertical-align: top; word-break: break-word; }}
-th {{ background: var(--accent-soft); color: var(--ink); }}
+th {{ background: var(--dark); color: #fff; }}
+table.kv th {{ background: var(--accent-soft); color: var(--ink); border-left: 3px solid var(--accent); width: 30%; }}
 tr:nth-child(even) td {{ background: #f8fafc; }}
 table.mix td:nth-child(-n+2), table.mix th:nth-child(-n+2) {{ white-space: nowrap; width: 1%; }}
 code {{ font: 8.5pt Menlo, monospace; background: #eef1f5; padding: 0 2pt; border-radius: 2pt; }}
@@ -264,7 +265,7 @@ code {{ font: 8.5pt Menlo, monospace; background: #eef1f5; padding: 0 2pt; borde
 .kpi.good {{ background: var(--good-soft); border-color: var(--good); }} .kpi.good .v {{ color: var(--good); }}
 .kpi.warn {{ background: var(--warn-soft); border-color: var(--warn); }} .kpi.warn .v {{ color: var(--warn); }}
 .kpi.bad {{ background: var(--bad-soft); border-color: var(--bad); }} .kpi.bad .v {{ color: var(--bad); }}
-.kpi.neutral {{ border-color: var(--accent); }}
+.kpi.neutral {{ background: var(--dark); border-color: var(--accent); color: #fff; }} .kpi.neutral .l, .kpi.neutral .n {{ color: #cfcfcf; }} .kpi.neutral .v {{ color: var(--accent); }}
 figure {{ margin: 0 0 10pt; break-inside: avoid; }} img {{ width: 100%; border: 1px solid var(--rule); border-radius: 3pt; }}
 figcaption {{ font-size: 8.5pt; color: var(--muted); margin-top: 2pt; }}
 </style></head><body>
