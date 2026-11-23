@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -89,9 +90,17 @@ def main():
 
     def shoot(job):
         _, _, url, png = job
-        r = subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                            f"--window-size={a.width},{a.height}", "--virtual-time-budget=15000",
-                            f"--screenshot={png}", url], capture_output=True, timeout=90)
+        # A profile of its own, removed after the shot. Without --user-data-dir
+        # each headless Chrome leaves a ~13 MB scoped_dir in
+        # ~/Library/Caches/Google/Chrome-headless, which filled the disk.
+        profile = tempfile.mkdtemp(prefix="grafana-shot-")
+        try:
+            r = subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                                f"--user-data-dir={profile}",
+                                f"--window-size={a.width},{a.height}", "--virtual-time-budget=15000",
+                                f"--screenshot={png}", url], capture_output=True, timeout=90)
+        finally:
+            shutil.rmtree(profile, ignore_errors=True)
         return r.returncode == 0 and os.path.exists(png)
 
     print(f"{run}: {len(jobs)} panels, {meta.get('started_at')} .. {meta.get('finished_at')} (+/- {a.margin:.0f}s)")
