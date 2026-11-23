@@ -35,6 +35,18 @@ Pick one engine and one strategy per lab in `config/ha.yml` (`db_engine`, `ha_pr
 | | `sync-replication` | manual | 2 | containers, end to end |
 | | `patroni` | Patroni (etcd DCS) | 3 | systemd containers, end to end |
 
+> [!WARNING]
+> **Switching strategy or engine.** Follow these steps in this order. `make destroy` acts on what `config/ha.yml` says now, so run it before you edit the file.
+>
+> 1. Remove the current topology:
+>    - Same engine, other strategy: `make destroy`
+>    - Other engine: `make destroy DATA=1` (deletes the database packages and **all data**)
+> 2. Edit `ha_provider` (and `db_engine`) in `config/ha.yml`.
+> 3. If `db_engine` changed, run `make provision`.
+> 4. Run `make ha`.
+>
+> Deployment refuses a different provider while the old one is still recorded on the nodes.
+
 "End to end" means deploy, idempotent redeploy, health, switchover, unplanned failover, recover, ledger consistency and destroy, run against database containers with the Ansible Docker connection. None of it has run on a real Ubuntu host with systemd yet: package installs, service units and the firewall are untested there.
 
 Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See [docs/architecture/engines.md](docs/architecture/engines.md) for the layout and how to add an engine, and [ha/README.md](ha/README.md) for the HA scenario runbooks of every engine. [docs/architecture/diagrams.md](docs/architecture/diagrams.md) has diagrams of the components, the engine abstraction, the lab lifecycle, failover and a benchmark run.
@@ -85,7 +97,7 @@ make provision            # chrony, firewall, the database server, accounts, exp
 make monitoring           # targets, Prometheus + Grafana, local client probe
 make metrics-check        # promtool, direct exporter checks, Prometheus target health
 
-make ha HA=async-replication   # must match ha_provider in config/ha.yml
+make ha                        # ha_provider from config/ha.yml
 make topology                  # health
 
 make jmeter-install
@@ -154,7 +166,7 @@ Configuration   make init | deps | validate | validate-local | validate-config
 Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check | probes-start | probes-stop
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
-HA              make ha HA=<strategy> | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
+HA              make ha [HA=<strategy>] | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
 Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem [ACTION=restore] CONFIRM=yes
 Benchmark       make jmeter-install | benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
 Reports         make report [RUN=<run_id>]
@@ -176,7 +188,7 @@ The scenarios are `baseline`, `read-heavy` (80/20), `write-heavy` (20/80), `mixe
 
   An existing ntp, ntpsec or openntpd is kept, and chrony is installed only when none of them is present. Each engine's package repository is pinned to that engine's packages only.
 - **Existing data is protected.** Provisioning refuses to touch a datadir or cluster the lab did not create. PostgreSQL uses its own cluster named `halab` and never touches other clusters. To take over an existing server anyway, pass `ARGS="-e mysql_adopt_existing=true"` (or `mariadb_adopt_existing`, `postgres_adopt_existing`). This changes its config and restarts it. It never deletes data.
-- **Topology switches are explicit.** `make ha HA=x` refuses to run when `x` differs from `ha_provider` in `config/ha.yml`. Nodes record their deployed provider in a marker file, and deployment refuses a different provider until you run `make destroy`.
+- **Topology switches are explicit.** `make ha` deploys `ha_provider` from `config/ha.yml`; `make ha HA=x` refuses to run when `x` differs from `ha_provider` in `config/ha.yml`. Nodes record their deployed provider in a marker file, and deployment refuses a different provider until you run `make destroy`.
 - **Replicas are never attached with divergent data.** MySQL and MariaDB refuse errant GTIDs; PostgreSQL refuses to replace a replica's data unless you pass `-e postgres_rebuild_replica=true`. A switchover fences the old primary before it promotes the new one, picks the most advanced candidate, and unfences the old primary if the promotion fails.
 - **Faults need opt-in.** Every fault requires `CONFIRM=yes`. Isolation and netem also schedule a restore on the node itself.
 - **Destructive targets need confirmation.** `make destroy` asks you to type the environment name. `DATA=1` also purges the server packages and the data.
