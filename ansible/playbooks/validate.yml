@@ -37,14 +37,21 @@
     - name: Assert supported OS and architecture
       ansible.builtin.assert:
         that:
-          - (ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['22.04', '24.04'])
-            or (ansible_distribution == 'Debian' and ansible_distribution_major_version == '12')
-          - ansible_architecture in lab_engine.architectures | default(['x86_64'])
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['architecture'] in lab_engine.architectures | default(['x86_64'])
         fail_msg: >-
-          {{ inventory_hostname }}: {{ ansible_distribution }} {{ ansible_distribution_version }}
-          {{ ansible_architecture }} is not supported (Ubuntu 22.04/24.04 or Debian 12;
+          {{ inventory_hostname }}: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+          {{ ansible_facts['architecture'] }} is not supported (apt-based OS required;
           {{ db_engine }} on {{ lab_engine.architectures | default(['x86_64']) | join(', ') }}).
         quiet: true
+
+    - name: Warn about an untested OS release
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }},
+          not tested (tested: {{ lab_tested_os | to_json }}). Provisioning works if the {{ db_engine }} repo
+          publishes '{{ ansible_facts['distribution_release'] }}'.
+      when: ansible_facts['distribution_version'] not in lab_tested_os[ansible_facts['distribution']] | default([])
 
     - name: Summary
       ansible.builtin.debug:

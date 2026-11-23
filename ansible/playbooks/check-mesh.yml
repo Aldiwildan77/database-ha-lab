@@ -76,6 +76,8 @@
   hosts: db_nodes
   gather_facts: false
   become: true
+  vars:
+    mesh_nodes: "{{ groups['db_nodes'] | map('extract', hostvars) | selectattr('mesh_port_state', 'defined') | map(attribute='inventory_hostname') | list }}"
   pre_tasks:
     - name: Load secrets
       ansible.builtin.import_tasks: ../tasks/load-secrets.yml
@@ -85,7 +87,7 @@
         host: "{{ hostvars[item.0].node_address }}"
         port: "{{ item.1 }}"
         timeout: 5
-      loop: "{{ groups['db_nodes'] | difference([inventory_hostname]) | product(lab_mesh_tcp_ports) | list }}"
+      loop: "{{ mesh_nodes | difference([inventory_hostname]) | product(lab_mesh_tcp_ports) | list }}"
       loop_control:
         label: "{{ inventory_hostname }} -> {{ item.0 }}:{{ item.1 }}"
       register: mesh_tcp
@@ -111,6 +113,8 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    mesh_nodes: "{{ groups['db_nodes'] | map('extract', hostvars) | selectattr('mesh_port_state', 'defined') | map(attribute='inventory_hostname') | list }}"
   tasks:
     - name: Local checks
       block:
@@ -122,7 +126,7 @@
             host: "{{ lab_node_addresses[item.0] }}"
             port: "{{ item.1 }}"
             timeout: 5
-          loop: "{{ groups['db_nodes'] | product(lab_client_tcp_ports + lab_monitoring_tcp_ports) | list }}"
+          loop: "{{ mesh_nodes | product(lab_client_tcp_ports + lab_monitoring_tcp_ports) | list }}"
           loop_control:
             label: "local -> {{ item.0 }}:{{ item.1 }}"
           register: mesh_local

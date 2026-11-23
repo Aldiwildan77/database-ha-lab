@@ -1,8 +1,4 @@
 ---
-common_supported_os:
-  Ubuntu: ["22.04", "24.04"]
-  Debian: ["12"]
-
 common_packages:
   - ca-certificates
   - curl

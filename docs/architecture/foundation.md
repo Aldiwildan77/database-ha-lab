@@ -57,7 +57,7 @@ Different ports do not let two *system* MySQL or MariaDB installations share a h
 
 | Component | Version |
 |---|---|
-| OS | Ubuntu 22.04, 24.04; Debian 12 (MySQL x86_64 only; MariaDB and PostgreSQL also arm64) |
+| OS | apt-based; tested Ubuntu 22.04, 24.04, Debian 12; others warn (MySQL x86_64 only; MariaDB and PostgreSQL also arm64) |
 | MySQL | 8.4 LTS (default), 8.0 |
 | MariaDB | 11.4 LTS (default), 10.11, 11.8 |
 | PostgreSQL | 17 (default), 16, 18 |

@@ -1,13 +1,16 @@
 ---
-- name: Assert supported operating system
+- name: Assert apt-based operating system
   ansible.builtin.assert:
-    that:
-      - ansible_distribution in common_supported_os
-      - ansible_distribution_version in common_supported_os[ansible_distribution]
-    fail_msg: >-
-      {{ inventory_hostname }} runs {{ ansible_distribution }} {{ ansible_distribution_version }}.
-      Supported: {{ common_supported_os | to_json }}
+    that: ansible_facts['os_family'] == 'Debian'
+    fail_msg: "{{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}; the lab needs an apt-based OS."
     quiet: true
+
+- name: Warn about an untested OS release
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }},
+      not tested (tested: {{ lab_tested_os | to_json }}).
+  when: ansible_facts['distribution_version'] not in lab_tested_os[ansible_facts['distribution']] | default([])
 
 - name: Read installed packages
   ansible.builtin.command:

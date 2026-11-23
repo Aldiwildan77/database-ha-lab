@@ -43,6 +43,8 @@ CORE_PORTS = {
     "iperf": 15201,
 }
 NODE_ROLES = {"primary", "replica"}
+# Releases the lab was tested on. Other apt-based releases run with a warning; the vendor repo decides.
+TESTED_OS = {"Ubuntu": ["22.04", "24.04"], "Debian": ["12"]}
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?$")
@@ -204,6 +206,7 @@ class InventoryModule(BaseInventoryPlugin):
         self.inventory.add_child("mysql_nodes", "db_nodes")
         all_vars = {
             "lab_root": lab_root,
+            "lab_tested_os": TESTED_OS,
             "lab_config_dir": config_dir,
             "lab_environment": env.get("name", "lab"),
             "lab_networks": {k: v for k, v in networks.items() if k in used},

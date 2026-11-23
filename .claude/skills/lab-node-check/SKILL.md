@@ -49,7 +49,7 @@ Lab total = VMs x spec. Example: PostgreSQL `streaming-replication`, recommended
 
 | Item | Minimum | Recommended | Notes |
 |---|---|---|---|
-| OS | Ubuntu 22.04 / 24.04, Debian 12 | same on all nodes | Others are refused by `make validate` |
+| OS | apt-based; tested Ubuntu 22.04 / 24.04, Debian 12 | same on all nodes | Untested releases warn; non-apt OS is refused |
 | Disk type | any | SSD / NVMe | Shared or HDD disks make commit latency noisy |
 | Network between nodes | 1 Gbit, every node reaches every other on the strategy's ports | < 1 ms in one DC | Multi-DC: semi-sync and sync replication pay one RTT per commit |
 | Network from the operator's machine | SSH + client + monitoring ports reachable | Tailscale, VPN or same LAN | |

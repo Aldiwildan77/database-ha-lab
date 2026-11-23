@@ -49,7 +49,7 @@ Each engine lives in `ansible/engines/<engine>/` (descriptor, roles, hooks). See
 - Java 8+ for JMeter (`make jmeter-install` downloads JMeter and the JDBC driver of the configured engine)
 
 **Remote nodes**
-- Ubuntu 22.04, Ubuntu 24.04 or Debian 12, with `python3` (Ansible needs it)
+- An apt-based OS (tested: Ubuntu 22.04, 24.04, Debian 12; other releases run with a warning), with `python3`
 - MySQL: x86_64 only, because repo.mysql.com publishes amd64 packages only. MariaDB, PostgreSQL and the exporters also run on arm64.
 - Reachable from this machine and from every other node: Tailscale with MagicDNS, a private network, or a VPN
 - SSH access with a sudo-capable user (see Node user below)
