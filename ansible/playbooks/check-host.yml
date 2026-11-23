@@ -73,7 +73,9 @@
           {%- set _ = c.append('package ' ~ p ~ ' is installed (another MySQL/MariaDB server)') -%}
           {%- endfor -%}
           {%- for port, proc in host_listeners.items() -%}
-          {%- if not (host_lab_managed and proc in lab_processes) -%}
+          {#- Lab exporters and collector outlive make destroy DATA=1 (which removes the database marker). -#}
+          {%- if not (proc in lab_processes and (host_lab_managed or (host_markers.results[1].stat.exists
+                                                  and proc not in lab_engine.process_names))) -%}
           {%- set _ = c.append('port ' ~ port ~ ' is already used by ' ~ proc) -%}
           {%- endif -%}
           {%- endfor -%}
