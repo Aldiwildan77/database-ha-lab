@@ -53,6 +53,20 @@
       Pin: origin repo.mysql.com
       Pin-Priority: 1001
 
+# The package starts mysqld during install; without this it binds 3306, which may belong to another service.
+- name: Create config directory before install
+  ansible.builtin.file:
+    path: "{{ mysql_config_file | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Set lab port before install
+  ansible.builtin.copy:
+    dest: "{{ mysql_config_file }}"
+    mode: "0644"
+    force: false
+    content: "[mysqld]\nport = {{ mysql_port }}\nmysqlx = OFF\n"
+
 - name: Install MySQL
   ansible.builtin.apt:
     name: "{{ mysql_packages }}"

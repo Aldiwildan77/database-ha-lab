@@ -39,6 +39,20 @@
       Pin: origin deb.mariadb.org
       Pin-Priority: 1001
 
+# The package starts mariadbd during install; without this it binds 3306, which may belong to another service.
+- name: Create config directory before install
+  ansible.builtin.file:
+    path: "{{ mariadb_config_file | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Set lab port before install
+  ansible.builtin.copy:
+    dest: "{{ mariadb_config_file }}"
+    mode: "0644"
+    force: false
+    content: "[mariadbd]\nport = {{ mysql_port }}\n"
+
 - name: Install MariaDB
   ansible.builtin.apt:
     name: "{{ mariadb_packages }}"
