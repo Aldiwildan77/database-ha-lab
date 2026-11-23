@@ -14,7 +14,7 @@ CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
 
-.PHONY: help manual screenshots init deps validate validate-local validate-config plan-host provision configure-exporters collect-info \
+.PHONY: help manual screenshots pdf init deps validate validate-local validate-config plan-host provision configure-exporters collect-info \
         targets monitoring monitoring-stop monitoring-status metrics-check mesh-check network-check network-matrix \
         probes-start probes-stop ha topology switchover promote recover fault jmeter-install scenarios \
         dashboards benchmark failover report status destroy lint
@@ -144,6 +144,9 @@ failover: validate-config ## Failover experiment under load: make failover CONFI
 
 screenshots: ## Capture every Grafana panel for a run: make screenshots [RUN=<run_id>]
 	python3 -I benchmark/runner/screenshots.py $(if $(RUN),--run $(RUN))
+
+pdf: ## PDF of a run (scenario, JMeter plan, results, screenshots): make pdf [RUN=<run_id>]
+	python3 -I benchmark/report/pdf.py $(if $(RUN),--run $(RUN))
 
 report: ## Rebuild a report: make report [RUN=<run_id>] (default: latest)
 	@run="$(or $(RUN),$$(ls -1d benchmark/results/run-* 2>/dev/null | sort | tail -1 | xargs -n1 basename))"; \
