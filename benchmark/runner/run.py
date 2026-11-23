@@ -35,6 +35,7 @@ FAULT_ALIASES = {"stop-mysql": "stop-db", "kill-mysql": "kill-db"}   # old names
 FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", *FAULT_ALIASES]
 SCENARIO_FAULT = {"failover-test": "stop-db", "network-disruption": "netem"}
 SERVER_FAULTS = ("stop-db", "kill-db", "isolate")
+DOWN_POLLS = 3
 
 
 def now():
@@ -121,6 +122,8 @@ class Poller(threading.Thread):
         self.stop_flag = threading.Event()
         self.fault_node = None
         self.state = {}
+        # A single slow scrape is not an outage: the primary counts as down after DOWN_POLLS bad polls in a row.
+        self.bad_since, self.bad_polls, self.bad_reason = None, 0, ""
 
     def healthy(self, m):
         if not m or m.get("ha_lab_db_up") != 1:
@@ -139,8 +142,13 @@ class Poller(threading.Thread):
             if fn and self.events.has("fault_injected"):
                 m = snap.get(fn)
                 if m is None or m.get("ha_lab_writable") != 1:
-                    self.events.add("primary_unavailable", t, node=fn,
-                                    reason="collector unreachable" if m is None else "not writable")
+                    self.bad_since = self.bad_since or t
+                    self.bad_polls += 1
+                    self.bad_reason = "collector unreachable" if m is None else "not writable"
+                    if self.bad_polls >= DOWN_POLLS:
+                        self.events.add("primary_unavailable", self.bad_since, node=fn, reason=self.bad_reason)
+                else:
+                    self.bad_since, self.bad_polls = None, 0
                 others = [n for n, mm in snap.items() if n != fn and mm and mm.get("ha_lab_writable") == 1]
                 if others:
                     self.events.add("new_primary_writable", t, node=others[0], all_writable=others)
@@ -155,6 +163,9 @@ class Poller(threading.Thread):
 
     def writable(self):
         return [n for n, m in self.state.items() if m and m.get("ha_lab_writable") == 1]
+
+    def primary_down(self):
+        return self.bad_polls >= DOWN_POLLS
 
     def converged(self):
         up = [m for m in self.state.values() if m and m.get("ha_lab_db_up") == 1]
@@ -342,6 +353,10 @@ def main():
             promoted = False
             while jm.poll() is None and now() - t_inj < a.fault_duration:
                 if manual and not a.no_promote and not promoted and events.has("primary_unavailable"):
+                    if not poller.primary_down():
+                        events.add("primary_recovered_before_promotion", now(), repeat=True)
+                        events.items = [e for e in events.items if e["event"] != "primary_unavailable"]
+                        continue
                     det = next(e["ts"] for e in events.items if e["event"] == "primary_unavailable")
                     if now() - det >= promote_after:
                         promoted = True
