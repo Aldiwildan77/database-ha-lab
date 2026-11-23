@@ -422,11 +422,10 @@ make fault NODE=lab-ivan FAULT=netem ACTION=restore CONFIRM=yes</code></pre>
 
 <h3>8.4 Benchmarks</h3>
 <pre><code>make jmeter-install
-make benchmark SCENARIO=prepare
 make benchmark SCENARIO=mixed-workload [ENDPOINT=ha|primary|&lt;node&gt;] [J="threads=32 duration=600"]</code></pre>
 <table>
 <tr><th>Scenario</th><th>Read ratio</th><th>Threads</th><th>Ramp-up (s)</th><th>Duration (s)</th><th>Use</th></tr>
-<tr><td>prepare</td><td>-</td><td>1</td><td>0</td><td>up to 1800</td><td>Create and load the test schema (run first)</td></tr>
+<tr><td><i>data load</i></td><td>-</td><td>1</td><td>0</td><td>up to 1800</td><td>Runs automatically before every scenario; <code>RUN_ARGS=--skip-prepare</code> skips it</td></tr>
 <tr><td>baseline</td><td>0.5</td><td>2</td><td>10</td><td>120</td><td>Low-load reference latency</td></tr>
 <tr><td>read-heavy</td><td>0.8</td><td>16</td><td>30</td><td>300</td><td>Read scaling</td></tr>
 <tr><td>write-heavy</td><td>0.2</td><td>16</td><td>30</td><td>300</td><td>Commit cost of the strategy</td></tr>
