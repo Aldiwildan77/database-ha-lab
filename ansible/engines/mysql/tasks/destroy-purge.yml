@@ -25,6 +25,7 @@
     purge: true
     autoremove: true
 
+# /etc/mysql itself stays: mysql-common (kept, other software may depend on it) owns my.cnf and conf.d.
 - name: Delete datadir and config
   ansible.builtin.file:
     path: "{{ item }}"
@@ -32,6 +33,9 @@
   loop:
     - /var/lib/mysql
     - /var/lib/mysql-files
-    - /etc/mysql
+    - /etc/mysql/mysql.conf.d
+    - /etc/mysql/pxc-certs
+    - /etc/mysql/.ha-lab-managed
+    - /etc/mysql/.ha-lab-provider
     - /etc/mysqlrouter
     - /etc/apt/preferences.d/mysql

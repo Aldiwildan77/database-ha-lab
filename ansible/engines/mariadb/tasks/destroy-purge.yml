@@ -23,6 +23,11 @@
     state: absent
   loop:
     - /var/lib/mysql
-    - /etc/mysql
+    # /etc/mysql itself stays: mysql-common / mariadb-common (kept, other software may depend on them) own my.cnf and conf.d.
+    - /etc/mysql/mariadb.conf.d
+    - /etc/mysql/halab-tls
+    - /etc/mysql/halab-galera-tls
+    - /etc/mysql/.ha-lab-managed
+    - /etc/mysql/.ha-lab-provider
     - /etc/apt/preferences.d/mariadb
     - /etc/apt/sources.list.d/mariadb.sources

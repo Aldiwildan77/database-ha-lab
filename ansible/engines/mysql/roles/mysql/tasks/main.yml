@@ -54,11 +54,13 @@
       Pin-Priority: 1001
 
 # The package starts mysqld during install; without this it binds 3306, which may belong to another service.
-- name: Create config directory before install
+- name: Create config directories before install
   ansible.builtin.file:
-    path: "{{ mysql_config_file | dirname }}"
+    path: "{{ item }}"
     state: directory
     mode: "0755"
+  # conf.d: my.cnf includes it; an older make destroy deleted it while mysql-common stayed installed.
+  loop: ["{{ mysql_config_file | dirname }}", /etc/mysql/conf.d]
 
 - name: Set lab port before install
   ansible.builtin.copy:
