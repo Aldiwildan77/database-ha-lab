@@ -145,7 +145,7 @@ failover: validate-config ## Failover experiment under load: make failover CONFI
 screenshots: ## Capture every Grafana panel for a run: make screenshots [RUN=<run_id>]
 	python3 -I benchmark/runner/screenshots.py $(if $(RUN),--run $(RUN))
 
-pdf: ## PDF of a run (scenario, JMeter plan, results, screenshots): make pdf [RUN=<run_id>]
+pdf: ## Report PDF of a run into reports/<db>/<ha>/<scenario>/ (run make screenshots first): make pdf [RUN=<run_id>]
 	python3 -I benchmark/report/pdf.py $(if $(RUN),--run $(RUN))
 
 report: ## Rebuild a report: make report [RUN=<run_id>] (default: latest)

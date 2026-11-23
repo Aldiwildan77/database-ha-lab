@@ -25,3 +25,9 @@ scenarios:                      # per-scenario overrides; read_ratio defaults li
 
 failover:
   manual_promotion_delay_seconds: 10   # async/semi-sync: operator reaction time simulated before make promote
+
+report:                         # make pdf -> reports/<db>/<ha_provider>/<scenario>/ (committed)
+  author: ""
+  organization: ""
+  location: ""
+  redact_addresses: true        # replace IP addresses with node names in the published PDF
