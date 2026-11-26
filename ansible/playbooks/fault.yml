@@ -341,7 +341,7 @@
       changed_when: true
       when: fault == 'disk-full' and action | default('inject') == 'inject'
 
-    - name: Free the database filesystem
+    - name: Free the database filesystem  # noqa: command-instead-of-module
       ansible.builtin.shell: |
         systemctl stop halab-disk-full.timer halab-disk-autorestore.timer 2>/dev/null || true
         rm -f "$(dirname {{ fault_disk_path }})/halab-disk-full.fill"
