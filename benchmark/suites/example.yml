@@ -1,0 +1,10 @@
+# make suite SUITE=benchmark/suites/example.yml [REPEAT=3] [REPORTS=1] CONFIRM=yes
+# Runs against the topology deployed now. Entry keys: scenario, fault, name, jmeter (JMeter properties), args (run.py flags).
+repeat: 3
+runs:
+  - scenario: mixed-workload
+  - scenario: failover-test
+    fault: kill-db
+  - scenario: wave-test
+    fault: degrade
+    args: --fault-at 120 --fault-duration 240

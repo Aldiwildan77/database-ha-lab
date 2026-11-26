@@ -142,6 +142,14 @@ failover: validate-config ## Failover experiment under load: make failover CONFI
 	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario failover-test \
 	  --fault $(or $(FAULT),stop-db) --confirm yes --endpoint $(or $(ENDPOINT),ha) $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
 
+suite: validate-config ## Run a suite file N times, then compare: make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]
+	@[ -n "$(SUITE)" ] || { echo "usage: make suite SUITE=benchmark/suites/<file>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]"; exit 1; }
+	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/suite.py --suite $(SUITE) $(if $(REPEAT),--repeat $(REPEAT)) \
+	  $(if $(REPORTS),--reports) $(if $(CONFIRM),--confirm $(CONFIRM))
+
+compare: ## Compare runs: make compare SUITE_DIR=benchmark/results/suites/<id> | RUNS="run-a run-b ..."
+	@python3 -I benchmark/report/compare.py $(if $(SUITE_DIR),--suite $(SUITE_DIR)) $(if $(RUNS),--runs $(RUNS))
+
 screenshots: ## Capture every Grafana panel for a run: make screenshots [RUN=<run_id>]
 	python3 -I benchmark/runner/screenshots.py $(if $(RUN),--run $(RUN))
 

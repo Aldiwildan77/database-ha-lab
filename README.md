@@ -84,6 +84,7 @@ Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
 Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem|degrade [ACTION=restore] CONFIRM=yes
 Benchmark       make benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
+Suites          make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes] | compare RUNS="run-a run-b"
 Reports         make report | screenshots | pdf [RUN=<run_id>] | manual
 Teardown        make destroy [DATA=1]
 Development     make lint | scenarios | dashboards

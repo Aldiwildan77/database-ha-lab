@@ -1,0 +1,8 @@
+# Quick check that the deployed topology and the pipeline work: about 6 min.
+repeat: 1
+runs:
+  - scenario: baseline
+    jmeter: {duration: 60}
+  - scenario: failover-test
+    fault: kill-db
+    jmeter: {duration: 180}
