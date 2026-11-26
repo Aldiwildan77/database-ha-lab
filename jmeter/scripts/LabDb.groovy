@@ -54,6 +54,34 @@ class LabDb {
         throw last ?: new SQLException("no writable endpoint among ${endpoints}", '08001')
     }
 
+    // A read-only node for stale-read checks; null when every node is writable (e.g. multi-primary).
+    static Map connectReplica(Properties p) {
+        def D = dialect(p)
+        for (String ep : p.getProperty('endpoints', '').split(',').collect { it.trim() }.findAll { it }) {
+            Connection c = null
+            try {
+                c = DriverManager.getConnection(D.url(ep, p.getProperty('database', 'halab'), p),
+                                                p.getProperty('db_user', 'bench'), p.getProperty('db_password', ''))
+                ResultSet rs = c.createStatement().executeQuery(D.roQuery())
+                rs.next()
+                if (rs.getInt(1) == 1) { String host = rs.getString(2); c.setAutoCommit(true); return [conn: c, servedBy: host] }
+                c.close()
+            } catch (SQLException ignored) {
+                try { c?.close() } catch (ignored2) {}
+            }
+        }
+        return null
+    }
+
+    // Tables of the orders workload; plain SQL that MySQL, MariaDB and PostgreSQL all accept.
+    static List<String> ordersSchema() {
+        return ['CREATE TABLE IF NOT EXISTS stock (item_id BIGINT PRIMARY KEY, qty BIGINT NOT NULL)',
+                'CREATE TABLE IF NOT EXISTS orders (txn_id VARCHAR(96) PRIMARY KEY, customer_id BIGINT NOT NULL, ' +
+                    'total BIGINT NOT NULL, created_ms BIGINT NOT NULL)',
+                'CREATE TABLE IF NOT EXISTS order_lines (txn_id VARCHAR(96) NOT NULL, line_no INT NOT NULL, ' +
+                    'item_id BIGINT NOT NULL, qty INT NOT NULL, PRIMARY KEY (txn_id, line_no))']
+    }
+
     static String classify(Throwable t, Object D) {
         Throwable e = t
         while (e != null) {

@@ -1,5 +1,6 @@
 ---
 client_location: local          # label recorded in every report, e.g. local-japan
+# load_host: user@loadgen-01     # run JMeter there over SSH (e.g. inside the DC); needs NTP-synced clocks
 endpoint: ha                    # ha | primary | <node name>  (ha = provider endpoint; others = direct-to-node)
 database: halab
 

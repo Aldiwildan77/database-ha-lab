@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--promote-after", type=float, default=10)
     ap.add_argument("--confirm", default="")
     ap.add_argument("--netem")
+    ap.add_argument("--host-wide", action="store_true")
     a = ap.parse_args()
     plan = parse_plan(a.plan)
     if a.confirm != "yes":
@@ -95,7 +96,7 @@ def main():
             note(f"{it['fault']} skipped: no writable primary")
             continue
         base = {"node": node, "fault": it["fault"], "confirm": "yes", "max_seconds": it["duration"] + 300,
-                **({"netem": a.netem} if a.netem else {})}
+                **({"netem": a.netem} if a.netem else {}), **({"host_wide": "yes"} if a.host_wide else {})}
         note(f"{it['fault']} on {node}")
         lab.ansible("fault.yml", {**base, "action": "inject"}, check=False)
         if it["fault"] in CRASH:

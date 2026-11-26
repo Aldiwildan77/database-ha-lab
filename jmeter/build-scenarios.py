@@ -104,6 +104,7 @@ def main():
             groups += thread_group("wave1", "${__P(wave1_threads,12)}", "30", "360", "120", s)
             groups += thread_group("wave2", "${__P(wave2_threads,32)}", "30", "120", "240", s)
             groups += thread_group("burst", "${__P(spike_threads,64)}", "1", "30", "300", s)
+        groups += thread_group("report", "${__P(report_threads,0)}", "5", f"${{__P(duration,{duration})}}", "0", s)
         with open(os.path.join(out, f"{name}.jmx"), "w") as fh:
             fh.write(plan(name, groups))
     prep = thread_group("prepare", "1", "0", "${__P(prepare_timeout,1800)}", "0",

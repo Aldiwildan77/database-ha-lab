@@ -115,10 +115,10 @@ recover: validate-config ## Bring a failed node back: make recover NODE=<node> [
 	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node> [REBUILD=1]"; exit 1; }
 	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE) $(if $(REBUILD),-e rebuild=true)
 
-fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client> [ACTION=restore] CONFIRM=yes
+fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client|clock-skew|disk-full> [ACTION=restore] [HOST_WIDE=1] CONFIRM=yes
 	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }
 	@[ -n "$(NODE)" ] && [ -n "$(FAULT)" ] || { echo "usage: make fault NODE=<node> FAULT=<type> [ACTION=inject|restore] CONFIRM=yes"; exit 1; }
-	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(NETEM),-e '{"netem": "$(NETEM)"}')
+	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(HOST_WIDE),-e host_wide=yes) $(if $(NETEM),-e '{"netem": "$(NETEM)"}')
 
 # ---------------------------------------------------------------- Benchmark
 jmeter-install: ## Install JMeter 5.6.3 + the JDBC driver of the configured db_engine into local/tools
@@ -135,7 +135,7 @@ benchmark: validate-config ## make benchmark SCENARIO=<name> [ENDPOINT=ha|primar
 	@echo " $(SCENARIOS) " | grep -q " $(SCENARIO) " || { echo "unknown scenario '$(SCENARIO)'. Valid: $(SCENARIOS)"; exit 1; }
 	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario $(SCENARIO) \
 	  $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(foreach p,$(J),-J $(p)) \
-	  $(if $(FAULT),--fault $(FAULT)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(RUN_ARGS)
+	  $(if $(FAULT),--fault $(FAULT)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(if $(HOST_WIDE),--host-wide) $(RUN_ARGS)
 
 failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate|freeze|partition-client]
 	@[ "$(CONFIRM)" = yes ] || { echo "The failover experiment stops the primary. Add CONFIRM=yes."; exit 1; }
@@ -149,6 +149,10 @@ chaos: validate-config ## Fault plan during one run: make chaos SCENARIO=<s> PLA
 
 local-lab: ## Local VMs for smoke tests (Lima): make local-lab [ACTION=up|down|status] [N=3] [ENGINE=postgres] [HA=patroni]
 	N=$(or $(N),3) ENGINE=$(or $(ENGINE),postgres) HA=$(or $(HA),patroni) local/scripts/local-lab.sh $(or $(ACTION),up)
+
+jmeter-ui: validate-config ## Open a scenario in the JMeter GUI with the lab properties: make jmeter-ui SCENARIO=<s> [J="threads=4"]
+	@[ -n "$(SCENARIO)" ] || { echo "usage: make jmeter-ui SCENARIO=<$(SCENARIOS)>"; exit 1; }
+	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario $(SCENARIO) --ui $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
 
 suite: validate-config ## Run a suite file N times, then compare: make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]
 	@[ -n "$(SUITE)" ] || { echo "usage: make suite SUITE=benchmark/suites/<file>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]"; exit 1; }
@@ -185,6 +189,9 @@ destroy: validate-config ## Remove the HA topology (asks for confirmation; DATA=
 
 manual: ## Rebuild the PDF manual (docs/manuals) with headless Chrome
 	docs/manuals/build.sh
+
+test: ## Offline unit tests of the runner and reports
+	python3 -m unittest discover -s tests
 
 lint: ## ansible-lint, yamllint, shellcheck, compose config, python compile
 	ansible-lint ansible/

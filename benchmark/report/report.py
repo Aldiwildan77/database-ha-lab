@@ -146,6 +146,8 @@ def build(run_dir, prometheus):
     prom = prometheus_summary(prometheus, meta["started_at_epoch"], meta["finished_at_epoch"], report_queries(ctx))
     json.dump(prom, open(os.path.join(run_dir, "prometheus-summary.json"), "w"), indent=2)
 
+    visible = analyze.visibility(rows)
+    summary["_visibility"] = visible
     results = {
         "run_id": meta["run_id"], "scenario": meta["scenario"], "ha_provider": ctx["ha_provider"],
         "environment": ctx["environment"], "endpoint_type": ctx["endpoint"]["type"],
@@ -163,7 +165,9 @@ def build(run_dir, prometheus):
         "failover_duration_s": failover.get("failover_duration_s"),
         "lost_acknowledged_writes": cons.get("lost_acknowledged_writes"),
         "consistency_errors": cons.get("consistency_errors"),
-        "summary": summary, "failover": failover,
+        "replica_visible_p99_ms": visible.get("p99_ms"),
+        "stale_not_visible": visible.get("not_visible"),
+        "summary": summary, "failover": failover, "visibility": visible,
     }
     json.dump(results, open(os.path.join(run_dir, "results.json"), "w"), indent=2)
     with open(os.path.join(run_dir, "report.md"), "w") as fh:
@@ -273,6 +277,13 @@ def render(meta, ctx, s, fo, cons, prom, net, events, run_dir=""):
             details = {k: v for k, v in e.items() if k not in ("event", "ts", "at")}
             L.append(f"| {e.get('at')} | {e['event']} | {details or ''} |")
         L.append("")
+
+    v = s.get("_visibility") or {}
+    if v:
+        L += ["## Replica visibility (stale reads)", "",
+              "Each committed write is read back from a replica until it appears (stale_check=1).", "",
+              "| Writes checked | Visible at once | p50 | p99 | Max | Not visible within window |", "|---|---|---|---|---|---|",
+              f"| {v['checked']} | {v['immediate']} | {v['p50_ms']} ms | {v['p99_ms']} ms | {v['max_ms']} ms | {v['not_visible']} |", ""]
 
     chaos_file = os.path.join(run_dir, "chaos-events.json")
     if os.path.exists(chaos_file):

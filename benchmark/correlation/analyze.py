@@ -32,6 +32,7 @@ def load_jtl(path):
                 "commit_s": int(row.get("commit_ns") or 0) / 1e9,
                 "served_by": row.get("served_by", ""),
                 "threads": int(row.get("allThreads") or 0),
+                "visible_ms": int(row["visible_ms"]) if (row.get("visible_ms") or "").lstrip("-").isdigit() else None,
             }
 
 
@@ -58,10 +59,12 @@ def summarize(rows, warmup_s=0.0):
     t0 = rows[0]["start_ms"] + warmup_s * 1000
     window = [r for r in rows if r["start_ms"] >= t0] or rows
     span = max(1e-9, (max(r["end_ms"] for r in window) - window[0]["start_ms"]) / 1000)
-    ok = [r for r in window if r["ok"]]
     by_op = defaultdict(list)
     for r in window:
         by_op[r["op"]].append(r)
+    reports = by_op.get("report", [])
+    window = [r for r in window if r["op"] != "report"] or window   # reporting traffic is summarized on its own
+    ok = [r for r in window if r["ok"]]
     writes = by_op.get("write", [])
     reads = by_op.get("read", [])
 
@@ -85,6 +88,7 @@ def summarize(rows, warmup_s=0.0):
         "tps": len(ok) / span,
         "write_tps": sum(1 for r in writes if r["ok"]) / span,
         "read_tps": sum(1 for r in reads if r["ok"]) / span,
+        "report_qps": sum(1 for r in reports if r["ok"]) / span,
         "error_rate": 1 - len(ok) / len(window),
         "errors_by_class": dict(Counter(r["err"] or "other" for r in window if not r["ok"])),
         "write_availability": avail(writes),
@@ -134,3 +138,14 @@ def rto(rows, fault_ms):
         "failed_writes_during_outage": failed,
         "note": "" if recovered else "writes never recovered before the run ended",
     }
+
+
+def visibility(rows):
+    """Stale-read check: delay until a committed write was readable on a replica (stale_check=1 runs)."""
+    v = [r["visible_ms"] for r in rows if r.get("visible_ms") is not None]
+    if not v:
+        return {}
+    seen = sorted(x for x in v if x >= 0)
+    q = lambda p: seen[min(len(seen) - 1, int(len(seen) * p))] if seen else None  # noqa: E731
+    return {"checked": len(v), "immediate": sum(1 for x in seen if x == 0), "not_visible": len(v) - len(seen),
+            "p50_ms": q(0.5), "p99_ms": q(0.99), "max_ms": seen[-1] if seen else None}

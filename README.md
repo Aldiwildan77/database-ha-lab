@@ -86,6 +86,7 @@ Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem|degrade|fre
 Benchmark       make benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
 Chaos           make chaos SCENARIO=<s> PLAN="180:kill-db 360:freeze/60@<node>" CONFIRM=yes
 Local VMs       make local-lab [ACTION=up|down|status] [N=3]   then export LAB_CONFIG_DIR=local/lab-vms/config
+JMeter GUI      make jmeter-ui SCENARIO=<s>   (same properties as a run; nothing recorded)
 Suites          make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes] | compare RUNS="run-a run-b"
 Reports         make report | screenshots | pdf [RUN=<run_id>] | manual
 Teardown        make destroy [DATA=1]

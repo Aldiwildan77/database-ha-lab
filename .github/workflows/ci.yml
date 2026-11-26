@@ -1,0 +1,38 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Tools
+        run: |
+          pip install ansible-core ansible-lint yamllint pyyaml
+          sudo apt-get install -y shellcheck
+          ansible-galaxy collection install -r requirements.yml -p ansible/collections
+          make init local/compose/.env
+      - name: Unit tests
+        run: make test
+      - name: Lint
+        run: make lint
+      - name: Config and playbook syntax
+        run: |
+          make validate-config
+          for p in ansible/playbooks/*.yml; do ansible-playbook --syntax-check "$p"; done
+      - name: JMeter plans and scripts
+        run: |
+          make jmeter-install
+          python3 jmeter/build-scenarios.py
+          git diff --exit-code jmeter/scenarios
+          java -cp "local/tools/jmeter/lib/*" org.codehaus.groovy.tools.FileSystemCompiler -d /tmp/groovy \
+            jmeter/scripts/LabDb.groovy jmeter/scripts/transaction.groovy jmeter/scripts/prepare.groovy

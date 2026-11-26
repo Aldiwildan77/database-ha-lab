@@ -4,6 +4,7 @@
 #   -e node=<name> -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore   (stop-mysql, kill-mysql still accepted)
 #   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
 #   degrade: the node stays up but barely works: stress-ng on CPU, disk and memory, plus netem ("delay 300ms 30ms loss 10%").
+#   clock-skew (-e skew=30 seconds) and disk-full (-e disk_leave_mb=64) change the whole host: they also need -e host_wide=yes.
 #   freeze: SIGSTOP the database (hung, not dead). slow-disk: cap database disk IO (-e disk_rate=1M -e disk_iops=50).
 #   partition-client: clients lose the node, the nodes still see each other.
 # Faults start on the node 3 s after the play returns, so injection never travels over the link it breaks.
@@ -46,9 +47,10 @@
       ansible.builtin.assert:
         that:
           - confirm | default('') == 'yes'
-          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem', 'degrade', 'freeze', 'slow-disk', 'partition-client']
+          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem', 'degrade', 'freeze', 'slow-disk', 'partition-client', 'clock-skew', 'disk-full']
+          - fault_kind not in ['clock-skew', 'disk-full'] or host_wide | default('') == 'yes'
           - action | default('inject') in ['inject', 'restore']
-        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client -e action=inject|restore"
+        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client|clock-skew|disk-full (+ host_wide=yes) -e action=inject|restore"
         quiet: true
 
     - name: Check the fault is really active
@@ -60,6 +62,8 @@
           isolate|partition-client) nft list table inet halab_fault >/dev/null 2>&1 ;;
           freeze) ps -o stat= -C {{ fault_proc }} | grep -q T ;;
           slow-disk) systemctl show {{ lab_db_service_unit }} -p IOWriteBandwidthMax | grep -q / ;;
+          clock-skew) ! timedatectl show -p NTPSynchronized --value | grep -q yes ;;
+          disk-full) test -f "$(dirname {{ fault_disk_path }})/halab-disk-full.fill" ;;
           *) true ;;
         esac && echo "1 $since" || echo "0 $since"
       args:
@@ -293,6 +297,58 @@
         executable: /bin/bash
       changed_when: true
       when: fault == 'partition-client' and action == 'restore'
+
+    - name: Skew the clock
+      ansible.builtin.shell: |
+        cat > /run/halab-clock-skew.sh <<'SH'
+        date +%s.%N > /run/halab-fault-active
+        timedatectl set-ntp false
+        systemctl stop chrony 2>/dev/null || true
+        date -s "@$(( $(date +%s) + {{ skew | default(30) | int }} ))"
+        SH
+        systemd-run --unit halab-clock-skew --on-active=3 sh /run/halab-clock-skew.sh
+        systemd-run --unit halab-clock-autorestore --on-active={{ max_seconds }} sh -c \
+          'timedatectl set-ntp true; systemctl start chrony 2>/dev/null; chronyc makestep 2>/dev/null || true'
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'clock-skew' and action | default('inject') == 'inject'
+
+    - name: Fix the clock  # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        systemctl stop halab-clock-skew.timer halab-clock-autorestore.timer 2>/dev/null || true
+        timedatectl set-ntp true
+        systemctl start chrony 2>/dev/null && chronyc makestep >/dev/null 2>&1 || systemctl restart systemd-timesyncd
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'clock-skew' and action == 'restore'
+
+    - name: Fill the database filesystem
+      ansible.builtin.shell: |
+        set -eo pipefail
+        f="$(dirname {{ fault_disk_path }})/halab-disk-full.fill"
+        cat > /run/halab-disk-full.sh <<SH
+        date +%s.%N > /run/halab-fault-active
+        free_mb=\$(df -Pm {{ fault_disk_path }} | awk 'NR==2 {print \$4}')
+        fill=\$(( free_mb - {{ disk_leave_mb | default(64) | int }} ))
+        [ "\$fill" -gt 0 ] && fallocate -l "\${fill}M" "$f"
+        SH
+        systemd-run --unit halab-disk-full --on-active=3 sh /run/halab-disk-full.sh
+        systemd-run --unit halab-disk-autorestore --on-active={{ max_seconds }} rm -f "$f"
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'disk-full' and action | default('inject') == 'inject'
+
+    - name: Free the database filesystem
+      ansible.builtin.shell: |
+        systemctl stop halab-disk-full.timer halab-disk-autorestore.timer 2>/dev/null || true
+        rm -f "$(dirname {{ fault_disk_path }})/halab-disk-full.fill"
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'disk-full' and action == 'restore'
 
     - name: Clear the active marker
       ansible.builtin.file:

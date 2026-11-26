@@ -43,6 +43,25 @@ if (!current) {
 } else {
     log.info("prepare: dataset already loaded (${rows} rows, seed ${seed})")
 }
+if (props.getProperty('workload', 'oltp') == 'orders') {
+    int items = Integer.parseInt(props.getProperty('items', '10000'))
+    LabDb.ordersSchema().each { st.execute(it) }
+    try { st.execute('CREATE INDEX orders_customer ON orders (customer_id)') } catch (SQLException ignored) {}   // exists
+    ResultSet rc = st.executeQuery('SELECT COUNT(*) FROM stock')
+    rc.next(); long have = rc.getLong(1); rc.close()
+    if (have != items) {
+        log.info("prepare: loading ${items} stock items")
+        st.execute('DELETE FROM stock')
+        conn.setAutoCommit(false)
+        PreparedStatement ps = conn.prepareStatement('INSERT INTO stock (item_id, qty) VALUES (?, ?)')
+        for (long i = 1; i <= items; i++) {
+            ps.setLong(1, i); ps.setLong(2, 1_000_000L); ps.addBatch()
+            if (i % 1000 == 0 || i == items) { ps.executeBatch(); conn.commit() }
+        }
+        ps.close()
+        conn.setAutoCommit(true)
+    }
+}
 st.close(); conn.close()
 SampleResult.setSuccessful(true)
 SampleResult.setResponseMessage(current ? 'dataset present' : "loaded ${rows} rows")
