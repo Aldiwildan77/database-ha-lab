@@ -27,3 +27,4 @@ local/tools/
 .claude/*
 !.claude/skills/
 local/lab-vms/
+ci-config/

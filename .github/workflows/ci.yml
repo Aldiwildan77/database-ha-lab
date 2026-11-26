@@ -6,6 +6,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    env:
+      LAB_CONFIG_DIR: ci-config
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +22,16 @@ jobs:
           pip install ansible-core ansible-lint yamllint pyyaml
           sudo apt-get install -y shellcheck
           ansible-galaxy collection install -r requirements.yml -p ansible/collections
-          make init local/compose/.env
+          make local/compose/.env
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
+          mkdir ci-config
+          for f in ha benchmark monitoring secrets; do cp config/$f.example.yml ci-config/$f.yml; done
+          printf '%s\n' 'environment: {name: ci, network: lan}' 'networks:' \
+            '  lan: {type: private, interface: eth1, cidrs: [10.20.0.0/24]}' 'nodes:' > ci-config/inventory.yml
+          for i in 1 2 3; do
+            printf '%s\n' "  - name: db-0$i" "    address: 10.20.0.1$i" "    ssh: {user: ci, private_key: ~/.ssh/id_ed25519}" \
+              "    role: $([ $i = 1 ] && echo primary || echo replica)" "    datacenter: dc-1" >> ci-config/inventory.yml
+          done
       - name: Unit tests
         run: make test
       - name: Lint

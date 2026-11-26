@@ -343,6 +343,8 @@ def main():
 
     lhost = bench.get("load_host")
     if lhost:
+        if bench.get("load_host_key"):
+            loadhost.SSH += ["-i", os.path.expanduser(bench["load_host_key"])]
         lbase = loadhost.base(lhost)
         log(f"load generator: {lhost} ({lbase})")
         loadhost.sync(lhost, ROOT, lbase)

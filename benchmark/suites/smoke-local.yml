@@ -1,0 +1,37 @@
+# Short runs of every feature, for local VMs (make local-lab) or a new lab: about 25 min.
+# make suite SUITE=benchmark/suites/smoke-local.yml CONFIRM=yes
+repeat: 1
+runs:
+  - name: orders-stale-report
+    scenario: baseline
+    jmeter: {duration: 60, workload: orders, stale_check: 1, report_threads: 2}
+  - name: crash-primary
+    scenario: failover-test
+    fault: kill-db
+    jmeter: {duration: 150}
+  - name: hung-primary
+    scenario: failover-test
+    fault: freeze
+    jmeter: {duration: 150}
+  - name: clients-lose-primary
+    scenario: failover-test
+    fault: partition-client
+    jmeter: {duration: 150}
+  - name: slow-disk
+    scenario: mixed-workload
+    fault: slow-disk
+    jmeter: {duration: 120, threads: 8, rampup: 5}
+    args: --fault-at 30 --fault-duration 45
+  - name: clock-skew
+    scenario: mixed-workload
+    fault: clock-skew
+    jmeter: {duration: 120, threads: 8, rampup: 5}
+    args: --fault-at 30 --fault-duration 45 --host-wide
+  - name: disk-full
+    scenario: mixed-workload
+    fault: disk-full
+    jmeter: {duration: 120, threads: 8, rampup: 5}
+    args: --fault-at 30 --fault-duration 45 --host-wide
+  - name: fixed-rate-burst
+    scenario: rate-test
+    jmeter: {duration: 90, rate: 20, threads: 32, burst_threads: 40, burst_rate: 60, spike_at: 30, spike_duration: 30}
