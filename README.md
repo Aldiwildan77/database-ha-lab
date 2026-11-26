@@ -119,12 +119,12 @@ Lab ports never use the product defaults, so the lab can share a host with exist
 
 ## Safety
 
-- 🛡️ `make plan-host` is read-only; `provision` stops on a used port, a conflicting DB package, or a datadir the lab did not create
-- 🛡️ No split brain: a restarted old primary always comes back read-only and must be rejoined with `make recover`
-- 🛡️ Replicas with errant GTIDs or divergent data are never attached
-- 🛡️ Faults need `CONFIRM=yes`; `make destroy` asks for the environment name
-- 🛡️ Firewall: its own nftables table `inet halab` for lab ports only (plus narrow ufw rules when ufw is active)
-- 🛡️ Real config, secrets and results are gitignored; only `*.example.yml` and `reports/` are committed
+- `make plan-host` is read-only; `provision` stops on a used port, a conflicting DB package, or a datadir the lab did not create
+- No split brain: a restarted old primary always comes back read-only and must be rejoined with `make recover`
+- Replicas with errant GTIDs or divergent data are never attached
+- Faults need `CONFIRM=yes`; `make destroy` asks for the environment name
+- Firewall: its own nftables table `inet halab` for lab ports only (plus narrow ufw rules when ufw is active)
+- Real config, secrets and results are gitignored; only `*.example.yml` and `reports/` are committed
 
 ## Docs
 
