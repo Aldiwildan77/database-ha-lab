@@ -112,6 +112,16 @@ class LoadHost(unittest.TestCase):
         self.assertEqual(out[7], "/h/halab-jmeter/run/jmeter.jtl")
 
 
+class Entrypoints(unittest.TestCase):
+    """Scripts run as make runs them (python3 -I): imports must resolve without the test's sys.path."""
+    def test_help(self):
+        import subprocess
+        for script in ("benchmark/runner/run.py", "benchmark/runner/chaos.py", "benchmark/runner/suite.py",
+                       "benchmark/report/compare.py", "benchmark/report/report.py", "benchmark/runner/screenshots.py"):
+            p = subprocess.run([sys.executable, "-I", os.path.join(ROOT, script), "--help"], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, f"{script}: {p.stderr[-300:]}")
+
+
 class Settings(unittest.TestCase):
     def test_ha_settings(self):
         with tempfile.TemporaryDirectory() as d:

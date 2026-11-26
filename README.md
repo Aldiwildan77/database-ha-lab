@@ -90,11 +90,15 @@ JMeter GUI      make jmeter-ui SCENARIO=<s>   (same properties as a run; nothing
 Suites          make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes] | compare RUNS="run-a run-b"
 Reports         make report | screenshots | pdf [RUN=<run_id>] | manual
 Teardown        make destroy [DATA=1]
-Development     make lint | scenarios | dashboards
+Development     make test | lint | scenarios | dashboards
 ```
 
 - Scenarios: `baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`, `failover-test`, `network-disruption`, `wave-test`, `rate-test`
 - `rate-test`: fixed request rate that does not drop when latency rises, e.g. `J="rate=50 burst_threads=200 burst_rate=170"` sends 10k requests in the 60 s burst. Keep threads >= rate x latency (s) and under `max_connections`.
+- Workload options (JMeter properties, `J="..."` or `jmeter:` in a suite): `workload=orders` (TPC-C-like orders, order lines, contended stock), `stale_check=1` (time until each write is readable on a replica), `report_threads=N` (reporting queries next to OLTP, reported apart from TPS).
+- `load_host: user@host` in `config/benchmark.yml` runs JMeter there over SSH, e.g. inside the DC; the JTL streams back. Clocks must be NTP-synced.
+- `clock-skew` (`-e skew=30`) and `disk-full` change the whole host: they need `HOST_WIDE=1`.
+- `make compare` also writes `compare.html`: charts with min-max over repeats and every run's timeline.
 - `wave-test`: 10 min, load rises and falls (4, 16, 48 threads, a 112-thread burst at 5:00-5:30, then back down)
 - Gray failures: `freeze` (database hung by SIGSTOP), `slow-disk` (`-e disk_rate=1M -e disk_iops=50`), `partition-client` (clients lose the node, nodes still see each other). Every fault starts on the node 3 s after injection returns and records whether it was really active.
 - `degrade` fault: the node stays up but barely works (stress-ng on CPU, disk and memory, plus netem, default `delay 300ms 30ms loss 10%`). Example:
