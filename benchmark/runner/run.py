@@ -30,12 +30,13 @@ sys.path.insert(0, os.path.join(ROOT, "benchmark", "report"))
 import netprobe  # noqa: E402
 
 SCENARIOS = ["baseline", "read-heavy", "write-heavy", "mixed-workload", "spike-test", "soak-test",
-             "failover-test", "network-disruption"]
+             "failover-test", "network-disruption", "wave-test"]
 FAULT_ALIASES = {"stop-mysql": "stop-db", "kill-mysql": "kill-db"}   # old names still accepted
-FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", *FAULT_ALIASES]
+FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", "degrade", *FAULT_ALIASES]
 SCENARIO_FAULT = {"failover-test": "stop-db", "network-disruption": "netem"}
 SERVER_FAULTS = ("stop-db", "kill-db", "isolate")
 DOWN_POLLS = 3
+NETEM_DEFAULT = {"netem": "delay 100ms 20ms loss 1%", "degrade": "delay 300ms 30ms loss 10%"}
 
 
 def now():
@@ -218,7 +219,7 @@ def main():
     ap.add_argument("--fault-node", help="default: the current primary")
     ap.add_argument("--fault-at", type=float, help="seconds after load start (default: 1/3 of duration)")
     ap.add_argument("--fault-duration", type=float, default=60, help="seconds until the fault is restored")
-    ap.add_argument("--netem", default="delay 100ms 20ms loss 1%")
+    ap.add_argument("--netem", help='default: "delay 100ms 20ms loss 1%%" for netem, "delay 300ms 30ms loss 10%%" for degrade')
     ap.add_argument("--promote-after", type=float, default=None,
                     help="async/semi-sync: seconds after detection to run manual promotion (default from config, 10)")
     ap.add_argument("--no-promote", action="store_true", help="async/semi-sync: never promote; measure the outage")
@@ -341,7 +342,7 @@ def main():
             while jm.poll() is None and now() - started < fault_at:
                 time.sleep(0.2)
             poller.fault_node = fault_node
-            base = {"node": fault_node, "fault": fault, "confirm": "yes", "netem": a.netem,
+            base = {"node": fault_node, "fault": fault, "confirm": "yes", "netem": a.netem or NETEM_DEFAULT.get(fault, NETEM_DEFAULT["netem"]),
                     "max_seconds": int(a.fault_duration + 300)}
             t_inj = now()
             ansible("fault.yml", {**base, "action": "inject"})

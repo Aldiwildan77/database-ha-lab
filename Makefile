@@ -9,7 +9,7 @@ VAULT_ARGS ?=
 ARGS      ?=
 
 HA_PROVIDERS := async-replication orchestrator semi-sync innodb-cluster percona-xtradb-cluster galera streaming-replication sync-replication patroni
-SCENARIOS    := baseline read-heavy write-heavy mixed-workload spike-test soak-test failover-test network-disruption
+SCENARIOS    := baseline read-heavy write-heavy mixed-workload spike-test soak-test failover-test network-disruption wave-test
 CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
@@ -115,7 +115,7 @@ recover: validate-config ## Bring a failed node back: make recover NODE=<node> [
 	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node> [REBUILD=1]"; exit 1; }
 	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE) $(if $(REBUILD),-e rebuild=true)
 
-fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem> [ACTION=restore] CONFIRM=yes
+fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem|degrade> [ACTION=restore] CONFIRM=yes
 	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }
 	@[ -n "$(NODE)" ] && [ -n "$(FAULT)" ] || { echo "usage: make fault NODE=<node> FAULT=<type> [ACTION=inject|restore] CONFIRM=yes"; exit 1; }
 	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(NETEM),-e '{"netem": "$(NETEM)"}')

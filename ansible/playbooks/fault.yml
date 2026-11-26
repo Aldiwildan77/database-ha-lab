@@ -3,6 +3,8 @@
 # Acts on the node's lab interface (tailscale0, eth1, wg0, ...).
 #   -e node=<name> -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore   (stop-mysql, kill-mysql still accepted)
 #   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
+#   degrade: the node stays up but barely works: stress-ng saturates CPU, disk and memory, plus netem
+#   (default "delay 300ms 30ms loss 10%"). No failover is triggered.
 # Before restarting a stopped or killed database, read who is writable: a node that lost its primary role
 # must not come back as a second primary.
 - name: Read topology before a database restore
@@ -33,9 +35,9 @@
       ansible.builtin.assert:
         that:
           - confirm | default('') == 'yes'
-          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem']
+          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem', 'degrade']
           - action | default('inject') in ['inject', 'restore']
-        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore"
+        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem|degrade -e action=inject|restore"
         quiet: true
 
     - name: Stop the database gracefully
@@ -138,3 +140,34 @@
         executable: /bin/bash
       changed_when: true
       when: fault == 'netem' and action == 'restore'
+
+    - name: Install stress-ng
+      ansible.builtin.apt:
+        name: stress-ng
+        state: present
+      when: fault == 'degrade' and action | default('inject') == 'inject'
+
+    - name: Degrade the node (CPU, disk, memory and network)
+      ansible.builtin.shell: |
+        set -e
+        systemctl stop halab-stress halab-degrade-netem 2>/dev/null || true
+        # Start 3 s later, so this SSH session returns over a clean link and injection takes seconds, not minutes.
+        systemd-run --unit halab-stress --on-active=3 stress-ng --cpu 0 --cpu-load 100 --io 4 --hdd 2 --hdd-bytes 1G \
+          --temp-path /var/tmp --vm 2 --vm-bytes 30% --timeout {{ max_seconds }}s
+        systemd-run --unit halab-degrade-netem --on-active=3 \
+          tc qdisc replace dev {{ node_interface }} root netem {{ netem | default('delay 300ms 30ms loss 10%') }}
+        systemd-run --unit halab-netem-autorestore --on-active={{ max_seconds }} tc qdisc del dev {{ node_interface }} root || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'degrade' and action | default('inject') == 'inject'
+
+    - name: Remove degradation
+      ansible.builtin.shell: |
+        systemctl stop halab-stress halab-stress.timer halab-degrade-netem.timer 2>/dev/null || true
+        tc qdisc del dev {{ node_interface }} root 2>/dev/null || true
+        systemctl stop halab-netem-autorestore.timer 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'degrade' and action == 'restore'

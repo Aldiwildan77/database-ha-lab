@@ -3,7 +3,7 @@
 # cs_dump.stdout is '<replication position> <accounts rows> <accounts balance sum>'.
 - name: Export txn_ids for the run
   ansible.builtin.shell: |
-    set -o pipefail
+    set -eo pipefail
     mysql -N -B -e "SELECT txn_id FROM \`{{ db }}\`.ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > {{ ledger_file }}
     mysql -N -B -e "SELECT @@gtid_executed; SELECT COUNT(*), COALESCE(SUM(balance), 0) FROM \`{{ db }}\`.accounts" | tr '\t\n' '  '
   args:

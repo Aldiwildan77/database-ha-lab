@@ -82,14 +82,17 @@ Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
-Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem [ACTION=restore] CONFIRM=yes
+Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem|degrade [ACTION=restore] CONFIRM=yes
 Benchmark       make benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
 Reports         make report | screenshots | pdf [RUN=<run_id>] | manual
 Teardown        make destroy [DATA=1]
 Development     make lint | scenarios | dashboards
 ```
 
-- Scenarios: `baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`, `failover-test`, `network-disruption`
+- Scenarios: `baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`, `failover-test`, `network-disruption`, `wave-test`
+- `wave-test`: 10 min, load rises and falls (4, 16, 48 threads, a 112-thread burst at 5:00-5:30, then back down)
+- `degrade` fault: the node stays up but barely works (stress-ng on CPU, disk and memory, plus netem, default `delay 300ms 30ms loss 10%`). Example:
+  `make benchmark SCENARIO=wave-test FAULT=degrade CONFIRM=yes RUN_ARGS="--fault-node db-02 --fault-at 120 --fault-duration 240"`
 - Extra Ansible args: `make provision ARGS="--limit db-02 --diff"`
 - Published reports: [reports/](reports/), named `<db>-<ver>_<ha>_<scenario>[_<fault>]_<date>-<seq>.pdf`, IPs redacted
 

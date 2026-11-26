@@ -6,8 +6,9 @@
   become: true
   vars:
     db: "{{ lab_benchmark.database | default('halab') }}"
-    # Per-node name: parallel fetches of one shared name can collide in out_dir.
-    ledger_file: "/tmp/halab-ledger-{{ inventory_hostname }}.txt"
+    # Per-node and per-run name: parallel fetches of one shared name can collide in out_dir, and a file left by an
+    # earlier run (another engine's OS user owns it) cannot be overwritten, so its stale ids would be read.
+    ledger_file: "/tmp/halab-ledger-{{ run_id }}-{{ inventory_hostname }}.txt"
   tasks:
     - name: Export the run's ledger ({{ db_engine }})
       ansible.builtin.include_tasks: "{{ lab_engine_tasks }}/ledger-dump.yml"
@@ -18,6 +19,13 @@
         dest: "{{ out_dir }}/ledger-{{ inventory_hostname }}.txt"
         flat: true
       when: cs_dump.rc | default(1) == 0
+
+    - name: Remove the node's ledger file
+      ansible.builtin.file:
+        path: "{{ ledger_file }}"
+        state: absent
+      failed_when: false
+      ignore_unreachable: true
 
     - name: Write node summary
       ansible.builtin.copy:

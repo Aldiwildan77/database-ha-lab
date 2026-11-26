@@ -17,6 +17,8 @@ SCENARIOS = {
     "soak-test": ("0.5", 16, 60, 3600, []),
     "failover-test": ("0.2", 8, 10, 300, []),
     "network-disruption": ("0.5", 8, 10, 300, []),
+    # 4 threads for 10 min; waves stack on top: 16 threads at 2-8 min, 48 at 4-6 min, +64 burst at 5:00-5:30.
+    "wave-test": ("0.5", 4, 10, 600, ["waves"]),
 }
 
 
@@ -79,6 +81,10 @@ def main():
         if "spike" in extra:
             groups += thread_group("spike", "${__P(spike_threads,64)}", "${__P(spike_rampup,1)}",
                                    "${__P(spike_duration,60)}", "${__P(spike_at,120)}", s)
+        if "waves" in extra:
+            groups += thread_group("wave1", "${__P(wave1_threads,12)}", "30", "360", "120", s)
+            groups += thread_group("wave2", "${__P(wave2_threads,32)}", "30", "120", "240", s)
+            groups += thread_group("burst", "${__P(spike_threads,64)}", "1", "30", "300", s)
         with open(os.path.join(out, f"{name}.jmx"), "w") as fh:
             fh.write(plan(name, groups))
     prep = thread_group("prepare", "1", "0", "${__P(prepare_timeout,1800)}", "0",

@@ -5,7 +5,7 @@
   become: true
   become_user: postgres
   ansible.builtin.shell: |
-    set -o pipefail
+    set -eo pipefail
     psql -X -v ON_ERROR_STOP=1 -h {{ pg_socket_dir }} -p {{ pg_port }} -d '{{ db }}' -At \
       -c "SELECT txn_id FROM ha_ledger WHERE run_id = '{{ run_id }}' ORDER BY txn_id" > {{ ledger_file }}
     psql -X -v ON_ERROR_STOP=1 -h {{ pg_socket_dir }} -p {{ pg_port }} -d '{{ db }}' -At -F ' ' \
