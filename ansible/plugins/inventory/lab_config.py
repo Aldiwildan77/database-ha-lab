@@ -144,10 +144,10 @@ class InventoryModule(BaseInventoryPlugin):
     def parse(self, inventory, loader, path, cache=False):
         super().parse(inventory, loader, path, cache)
         cfg = self._read_config_data(path)  # noqa: F841 (populates self.get_option)
-        config_dir = os.path.normpath(
-            os.path.join(os.path.dirname(os.path.abspath(path)), self.get_option("config_dir"))
-        )
-        lab_root = os.path.dirname(config_dir)
+        lab_root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(path)), "..", ".."))
+        # LAB_CONFIG_DIR switches to another lab (e.g. local VMs from make local-lab) without touching config/.
+        config_dir = os.path.normpath(os.path.join(lab_root, os.environ["LAB_CONFIG_DIR"])) if os.environ.get("LAB_CONFIG_DIR") \
+            else os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(path)), self.get_option("config_dir")))
 
         inv = self._load(os.path.join(config_dir, "inventory.yml"))
         ha = self._load(os.path.join(config_dir, "ha.yml"))

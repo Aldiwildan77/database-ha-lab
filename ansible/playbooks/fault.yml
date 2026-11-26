@@ -3,8 +3,11 @@
 # Acts on the node's lab interface (tailscale0, eth1, wg0, ...).
 #   -e node=<name> -e fault=stop-db|kill-db|isolate|netem -e action=inject|restore   (stop-mysql, kill-mysql still accepted)
 #   netem: -e netem="delay 100ms 10ms loss 1%"   duration safety net: -e max_seconds=600
-#   degrade: the node stays up but barely works: stress-ng saturates CPU, disk and memory, plus netem
-#   (default "delay 300ms 30ms loss 10%"). No failover is triggered.
+#   degrade: the node stays up but barely works: stress-ng on CPU, disk and memory, plus netem ("delay 300ms 30ms loss 10%").
+#   freeze: SIGSTOP the database (hung, not dead). slow-disk: cap database disk IO (-e disk_rate=1M -e disk_iops=50).
+#   partition-client: clients lose the node, the nodes still see each other.
+# Faults start on the node 3 s after the play returns, so injection never travels over the link it breaks.
+# -e fault_record=<local json> on restore writes whether the fault was really active, and since when.
 # Before restarting a stopped or killed database, read who is writable: a node that lost its primary role
 # must not come back as a second primary.
 - name: Read topology before a database restore
@@ -25,6 +28,14 @@
     fault_ports: "{{ (lab_mesh_tcp_ports + lab_client_tcp_ports) | map('int') | unique | list }}"
     max_seconds: 600
     fault_kind: "{{ {'stop-mysql': 'stop-db', 'kill-mysql': 'kill-db'}.get(fault, fault) }}"
+    fault_proc: "{{ lab_engine.process_names | first }}"
+    fault_disk_path: "{{ '/var/lib/postgresql' if db_engine == 'postgres' else '/var/lib/mysql' }}"
+    fault_io_on: >-
+      {% for k in ['IOReadBandwidthMax', 'IOWriteBandwidthMax', 'IOReadIOPSMax', 'IOWriteIOPSMax'] -%}
+      '{{ k }}={{ fault_disk_path }} {{ (disk_rate | default('1M')) if 'Bandwidth' in k else (disk_iops | default(50)) }}' {% endfor %}
+    fault_io_off: IOReadBandwidthMax= IOWriteBandwidthMax= IOReadIOPSMax= IOWriteIOPSMax=
+    fault_peers: >-
+      {{ groups['db_nodes'] | map('extract', hostvars, 'node_address') | list }}
     # Manual and Orchestrator strategies only; Galera, Group Replication and Patroni rejoin safely by themselves.
     fault_guard: "{{ lab_ha_strategy.family == 'replication' and lab_ha_strategy.failover != 'patroni' }}"
     fault_other_writable: >-
@@ -35,10 +46,40 @@
       ansible.builtin.assert:
         that:
           - confirm | default('') == 'yes'
-          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem', 'degrade']
+          - fault_kind in ['stop-db', 'kill-db', 'isolate', 'netem', 'degrade', 'freeze', 'slow-disk', 'partition-client']
           - action | default('inject') in ['inject', 'restore']
-        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem|degrade -e action=inject|restore"
+        fail_msg: "Pass -e confirm=yes -e fault=stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client -e action=inject|restore"
         quiet: true
+
+    - name: Check the fault is really active
+      ansible.builtin.shell: |
+        set -o pipefail
+        since=$(cat /run/halab-fault-active 2>/dev/null || echo "")
+        case "{{ fault_kind }}" in
+          netem|degrade) tc qdisc show dev {{ node_interface }} | grep -q netem ;;
+          isolate|partition-client) nft list table inet halab_fault >/dev/null 2>&1 ;;
+          freeze) ps -o stat= -C {{ fault_proc }} | grep -q T ;;
+          slow-disk) systemctl show {{ lab_db_service_unit }} -p IOWriteBandwidthMax | grep -q / ;;
+          *) true ;;
+        esac && echo "1 $since" || echo "0 $since"
+      args:
+        executable: /bin/bash
+      register: fault_check
+      changed_when: false
+      failed_when: false
+      when: action == 'restore'
+
+    - name: Record the check
+      ansible.builtin.copy:
+        dest: "{{ fault_record }}"
+        content: >-
+          {{ {'node': inventory_hostname, 'fault': fault_kind,
+              'active_at_restore': (fault_check.stdout | default('0')).split(' ')[0] == '1',
+              'active_since_epoch': ((fault_check.stdout | default('0')).split(' ') + [''])[1] | float(0) or none} | to_json }}
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      when: action == 'restore' and fault_record is defined
 
     - name: Stop the database gracefully
       ansible.builtin.systemd_service:
@@ -125,7 +166,8 @@
 
     - name: Add netem impairment on the lab interface
       ansible.builtin.shell: |
-        tc qdisc replace dev {{ node_interface }} root netem {{ netem | default('delay 100ms 20ms loss 1%') }}
+        systemd-run --unit halab-netem-start --on-active=3 sh -c 'date +%s.%N > /run/halab-fault-active; \
+          tc qdisc replace dev {{ node_interface }} root netem {{ netem | default('delay 100ms 20ms loss 1%') }}'
         systemd-run --unit halab-netem-autorestore --on-active={{ max_seconds }} tc qdisc del dev {{ node_interface }} root || true
       args:
         executable: /bin/bash
@@ -154,15 +196,15 @@
         # Start 3 s later, so this SSH session returns over a clean link and injection takes seconds, not minutes.
         systemd-run --unit halab-stress --on-active=3 stress-ng --cpu 0 --cpu-load 100 --io 4 --hdd 2 --hdd-bytes 1G \
           --temp-path /var/tmp --vm 2 --vm-bytes 30% --timeout {{ max_seconds }}s
-        systemd-run --unit halab-degrade-netem --on-active=3 \
-          tc qdisc replace dev {{ node_interface }} root netem {{ netem | default('delay 300ms 30ms loss 10%') }}
+        systemd-run --unit halab-degrade-netem --on-active=3 sh -c 'date +%s.%N > /run/halab-fault-active; \
+          tc qdisc replace dev {{ node_interface }} root netem {{ netem | default("delay 300ms 30ms loss 10%") }}'
         systemd-run --unit halab-netem-autorestore --on-active={{ max_seconds }} tc qdisc del dev {{ node_interface }} root || true
       args:
         executable: /bin/bash
       changed_when: true
       when: fault == 'degrade' and action | default('inject') == 'inject'
 
-    - name: Remove degradation
+    - name: Remove degradation  # noqa: command-instead-of-module
       ansible.builtin.shell: |
         systemctl stop halab-stress halab-stress.timer halab-degrade-netem.timer 2>/dev/null || true
         tc qdisc del dev {{ node_interface }} root 2>/dev/null || true
@@ -171,3 +213,89 @@
         executable: /bin/bash
       changed_when: true
       when: fault == 'degrade' and action == 'restore'
+
+    - name: Freeze the database (SIGSTOP)
+      ansible.builtin.shell: |
+        systemd-run --unit halab-freeze --on-active=3 sh -c 'date +%s.%N > /run/halab-fault-active; pkill -STOP -x {{ fault_proc }}'
+        systemd-run --unit halab-freeze-autorestore --on-active={{ max_seconds }} pkill -CONT -x {{ fault_proc }}
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'freeze' and action | default('inject') == 'inject'
+
+    - name: Unfreeze the database  # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        systemctl stop halab-freeze.timer halab-freeze-autorestore.timer 2>/dev/null || true
+        {% if fence | default(false) | bool %}
+        pkill -9 -x {{ fault_proc }} || true   # another node was promoted: waking it would make two primaries
+        {% endif %}
+        pkill -CONT -x {{ fault_proc }} || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'freeze' and action == 'restore'
+
+    - name: Slow down database disk IO
+      ansible.builtin.shell: |
+        printf '%s\n' 'date +%s.%N > /run/halab-fault-active' \
+          "systemctl set-property --runtime {{ lab_db_service_unit }} {{ fault_io_on }}" > /run/halab-slow-disk.sh
+        systemd-run --unit halab-slow-disk --on-active=3 sh /run/halab-slow-disk.sh
+        systemd-run --unit halab-slow-disk-autorestore --on-active={{ max_seconds }} \
+          systemctl set-property --runtime {{ lab_db_service_unit }} {{ fault_io_off }}
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'slow-disk' and action | default('inject') == 'inject'
+
+    - name: Restore database disk IO  # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        systemctl stop halab-slow-disk.timer halab-slow-disk-autorestore.timer 2>/dev/null || true
+        systemctl set-property --runtime {{ lab_db_service_unit }} {{ fault_io_off }}
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'slow-disk' and action == 'restore'
+
+    # Peers are resolved on the node, so hostnames work; client ports from any other source are dropped.
+    - name: Cut clients off the node (nodes still reach each other)
+      ansible.builtin.shell: |
+        set -eo pipefail
+        v4=$(for h in {{ fault_peers | join(' ') }}; do getent ahostsv4 "$h" | awk '{print $1}' || true; done | sort -u | paste -sd, -)
+        v6=$(for h in {{ fault_peers | join(' ') }}; do getent ahostsv6 "$h" | awk '$1 !~ /^::ffff:/ {print $1}' || true; done | sort -u | paste -sd, -)
+        r4=""; r6=""
+        [ -n "$v4" ] && r4="ip saddr { $v4 } accept"
+        [ -n "$v6" ] && r6="ip6 saddr { $v6 } accept"
+        cat > /run/halab-partition-client.nft <<NFT
+        table inet halab_fault {}
+        delete table inet halab_fault
+        table inet halab_fault {
+          chain input {
+            type filter hook input priority filter - 20; policy accept;
+            iifname "lo" accept
+            $r4
+            $r6
+            tcp dport { {{ lab_client_tcp_ports | map('int') | unique | join(', ') }} } drop
+          }
+        }
+        NFT
+        systemd-run --unit halab-partition-client --on-active=3 sh -c 'date +%s.%N > /run/halab-fault-active; nft -f /run/halab-partition-client.nft'
+        systemd-run --unit halab-fault-autorestore --on-active={{ max_seconds }} nft delete table inet halab_fault || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'partition-client' and action | default('inject') == 'inject'
+
+    - name: Reconnect clients  # noqa: command-instead-of-module
+      ansible.builtin.shell: |
+        systemctl stop halab-partition-client.timer halab-fault-autorestore.timer 2>/dev/null || true
+        nft delete table inet halab_fault 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: fault == 'partition-client' and action == 'restore'
+
+    - name: Clear the active marker
+      ansible.builtin.file:
+        path: /run/halab-fault-active
+        state: absent
+      when: action == 'restore'

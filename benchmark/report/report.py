@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "correlation"))
 sys.path.insert(0, os.path.join(HERE, "..", "validation"))
 import analyze  # noqa: E402
@@ -114,6 +115,8 @@ def build(run_dir, prometheus):
     ctx = json.load(open(os.path.join(run_dir, "context.json")))
     rows = list(analyze.load_jtl(os.path.join(run_dir, "jmeter.jtl")))
     summary = analyze.summarize(rows, meta.get("warmup_s", 0))
+    import timeline  # noqa: E402
+    timeline.write(run_dir, rows)
     events = json.load(open(os.path.join(run_dir, "failover-events.json"))) if os.path.exists(
         os.path.join(run_dir, "failover-events.json")) else []
     network = json.load(open(os.path.join(run_dir, "network.json"))) if os.path.exists(
@@ -164,7 +167,7 @@ def build(run_dir, prometheus):
     }
     json.dump(results, open(os.path.join(run_dir, "results.json"), "w"), indent=2)
     with open(os.path.join(run_dir, "report.md"), "w") as fh:
-        fh.write(render(meta, ctx, summary, failover, cons, prom, network, events))
+        fh.write(render(meta, ctx, summary, failover, cons, prom, network, events, run_dir))
     append_index(os.path.dirname(os.path.abspath(run_dir)), results)
     return results
 
@@ -186,7 +189,7 @@ def append_index(results_root, r):
         w.writerow({k: r.get(k) for k in cols})
 
 
-def render(meta, ctx, s, fo, cons, prom, net, events):
+def render(meta, ctx, s, fo, cons, prom, net, events, run_dir=""):
     L = []
     lat = s.get("latency_s", {})
     t = lat.get("transaction", {})
@@ -269,6 +272,13 @@ def render(meta, ctx, s, fo, cons, prom, net, events):
         for e in events:
             details = {k: v for k, v in e.items() if k not in ("event", "ts", "at")}
             L.append(f"| {e.get('at')} | {e['event']} | {details or ''} |")
+        L.append("")
+
+    chaos_file = os.path.join(run_dir, "chaos-events.json")
+    if os.path.exists(chaos_file):
+        L += ["## Chaos plan", "", "| Time (UTC) | t (s) | Event |", "|---|---|---|"]
+        for e in json.load(open(chaos_file)):
+            L.append(f"| {e['at']} | {e['t']:.0f} | {e['msg']} |")
         L.append("")
 
     if cons:

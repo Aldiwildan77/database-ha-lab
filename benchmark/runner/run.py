@@ -18,6 +18,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -30,11 +31,13 @@ sys.path.insert(0, os.path.join(ROOT, "benchmark", "report"))
 import netprobe  # noqa: E402
 
 SCENARIOS = ["baseline", "read-heavy", "write-heavy", "mixed-workload", "spike-test", "soak-test",
-             "failover-test", "network-disruption", "wave-test"]
+             "failover-test", "network-disruption", "wave-test", "rate-test"]
 FAULT_ALIASES = {"stop-mysql": "stop-db", "kill-mysql": "kill-db"}   # old names still accepted
-FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", "degrade", *FAULT_ALIASES]
+FAULTS = ["none", "stop-db", "kill-db", "isolate", "netem", "degrade", "freeze", "slow-disk", "partition-client",
+          *FAULT_ALIASES]
 SCENARIO_FAULT = {"failover-test": "stop-db", "network-disruption": "netem"}
-SERVER_FAULTS = ("stop-db", "kill-db", "isolate")
+SERVER_FAULTS = ("stop-db", "kill-db", "isolate", "freeze", "partition-client")
+FORCE_PROMOTE = ("isolate", "freeze", "partition-client")   # the old primary cannot be fenced cleanly
 DOWN_POLLS = 3
 NETEM_DEFAULT = {"netem": "delay 100ms 20ms loss 1%", "degrade": "delay 300ms 30ms loss 10%"}
 
@@ -72,6 +75,19 @@ def ansible(playbook, extra: dict, check=True):
     return p
 
 
+def ha_settings(ctx):
+    """The provider's section of config/ha.yml plus the engine's extra server options, for comparing runs."""
+    import yaml
+    try:
+        ha = yaml.safe_load(open(os.path.join(ROOT, os.environ.get("LAB_CONFIG_DIR", "config"), "ha.yml"))) or {}
+    except OSError:
+        return {}
+    out = dict(ha.get(ctx["ha_provider"].replace("-", "_")) or {})
+    if (ha.get(ctx.get("db_engine", "")) or {}).get("config"):
+        out["server_config"] = ha[ctx["db_engine"]]["config"]
+    return out
+
+
 def new_run_id(results):
     day = dt.datetime.now().strftime("%Y%m%d")
     n = 1
@@ -97,6 +113,19 @@ class Events:
 
     def has(self, event):
         return any(e["event"] == event for e in self.items)
+
+
+def db_alive(addr, port, engine, timeout=1.5):
+    """True when the server answers at protocol level; a frozen server still completes TCP connects."""
+    try:
+        with socket.create_connection((addr, int(port)), timeout=timeout) as c:
+            c.settimeout(timeout)
+            if engine == "postgres":
+                c.sendall(b"\x00\x00\x00\x08\x04\xd2\x16\x2f")   # SSLRequest; the server replies S or N
+                return c.recv(1) in (b"S", b"N")
+            return len(c.recv(4)) == 4   # MySQL/MariaDB greeting
+    except OSError:
+        return False
 
 
 def scrape(addr, port):
@@ -142,10 +171,14 @@ class Poller(threading.Thread):
             fn = self.fault_node
             if fn and self.events.has("fault_injected"):
                 m = snap.get(fn)
-                if m is None or m.get("ha_lab_writable") != 1:
+                # Client view first: a closed DB port is down; a missing scrape alone is a monitoring problem.
+                db_open = db_alive(self.ctx["addresses"][fn], self.ctx["db_port"], self.ctx.get("db_engine", "mysql"))
+                if m is None and db_open:
+                    self.events.add("collector_unreachable", t, node=fn)
+                if not db_open or (m is not None and m.get("ha_lab_writable") != 1):
                     self.bad_since = self.bad_since or t
                     self.bad_polls += 1
-                    self.bad_reason = "collector unreachable" if m is None else "not writable"
+                    self.bad_reason = "database not answering clients" if not db_open else "not writable"
                     if self.bad_polls >= DOWN_POLLS:
                         self.events.add("primary_unavailable", self.bad_since, node=fn, reason=self.bad_reason)
                 else:
@@ -315,6 +348,7 @@ def main():
         "jmeter_properties": {k: v for k, v in props.items() if k not in ("lab_script_dir",)},
         "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         "measurement_clock": "client wall clock (UTC) for events; System.nanoTime() for durations",
+        "ha_settings": ha_settings(ctx),
     }
     json.dump(meta, open(os.path.join(run_dir, "metadata.json"), "w"), indent=2)
 
@@ -364,11 +398,20 @@ def main():
                         events.add("manual_promotion_started", now())
                         p = ansible("failover.yml", {"failover_mode": "failover",
                                                      "events_file": os.path.join(run_dir, "promotion-events.json"),
-                                                     **({"force": True} if fault == "isolate" else {})}, check=False)
+                                                     **({"force": True} if fault in FORCE_PROMOTE else {})}, check=False)
                         events.add("manual_promotion_finished", now(), rc=p.returncode)
                 time.sleep(0.2)
             t_res = now()
-            ansible("fault.yml", {**base, "action": "restore"}, check=False)
+            record = os.path.join(run_dir, "fault-check.json")
+            ansible("fault.yml", {**base, "action": "restore", "fault_record": record,
+                                  **({"fence": True} if promoted else {})}, check=False)
+            try:
+                fc = json.load(open(record))
+                if fc.get("active_since_epoch"):
+                    events.add("fault_active", fc["active_since_epoch"], node=fault_node)
+                events.add("fault_check", now(), active_at_restore=fc.get("active_at_restore"))
+            except (OSError, ValueError):
+                events.add("fault_check", now(), active_at_restore=None)
             restored = True
             events.add("fault_restored", t_res, completed_at=iso(now()))
             if manual and promoted and fault in SERVER_FAULTS:

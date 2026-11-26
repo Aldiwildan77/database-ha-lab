@@ -26,3 +26,4 @@ local/tools/
 # Local agent state; project skills are shared
 .claude/*
 !.claude/skills/
+local/lab-vms/

@@ -9,7 +9,7 @@ VAULT_ARGS ?=
 ARGS      ?=
 
 HA_PROVIDERS := async-replication orchestrator semi-sync innodb-cluster percona-xtradb-cluster galera streaming-replication sync-replication patroni
-SCENARIOS    := baseline read-heavy write-heavy mixed-workload spike-test soak-test failover-test network-disruption wave-test
+SCENARIOS    := baseline read-heavy write-heavy mixed-workload spike-test soak-test failover-test network-disruption wave-test rate-test
 CONFIG_FILES := inventory ha monitoring benchmark
 
 ansible = $(PLAYBOOK) $(VAULT_ARGS) $(ARGS)
@@ -115,7 +115,7 @@ recover: validate-config ## Bring a failed node back: make recover NODE=<node> [
 	@[ -n "$(NODE)" ] || { echo "usage: make recover NODE=<node> [REBUILD=1]"; exit 1; }
 	$(ansible) ansible/playbooks/recover.yml -e node=$(NODE) $(if $(REBUILD),-e rebuild=true)
 
-fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem|degrade> [ACTION=restore] CONFIRM=yes
+fault: validate-config ## make fault NODE=<n> FAULT=<stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client> [ACTION=restore] CONFIRM=yes
 	@[ "$(CONFIRM)" = yes ] || { echo "Faults disrupt the cluster. Add CONFIRM=yes."; exit 1; }
 	@[ -n "$(NODE)" ] && [ -n "$(FAULT)" ] || { echo "usage: make fault NODE=<node> FAULT=<type> [ACTION=inject|restore] CONFIRM=yes"; exit 1; }
 	$(ansible) ansible/playbooks/fault.yml -e node=$(NODE) -e fault=$(FAULT) -e action=$(or $(ACTION),inject) -e confirm=yes $(if $(NETEM),-e '{"netem": "$(NETEM)"}')
@@ -137,10 +137,18 @@ benchmark: validate-config ## make benchmark SCENARIO=<name> [ENDPOINT=ha|primar
 	  $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(foreach p,$(J),-J $(p)) \
 	  $(if $(FAULT),--fault $(FAULT)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(RUN_ARGS)
 
-failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate]
+failover: validate-config ## Failover experiment under load: make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate|freeze|partition-client]
 	@[ "$(CONFIRM)" = yes ] || { echo "The failover experiment stops the primary. Add CONFIRM=yes."; exit 1; }
 	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/run.py --scenario failover-test \
 	  --fault $(or $(FAULT),stop-db) --confirm yes --endpoint $(or $(ENDPOINT),ha) $(foreach p,$(J),-J $(p)) $(RUN_ARGS)
+
+chaos: validate-config ## Fault plan during one run: make chaos SCENARIO=<s> PLAN="180:kill-db 360:freeze/60" CONFIRM=yes [J="duration=600"]
+	@[ -n "$(SCENARIO)" ] && [ -n "$(PLAN)" ] || { echo 'usage: make chaos SCENARIO=<s> PLAN="<s>:<fault>[/<dur>][@<node>] ..." CONFIRM=yes'; exit 1; }
+	VAULT_ARGS="$(VAULT_ARGS)" python3 -I benchmark/runner/chaos.py --scenario $(SCENARIO) --plan "$(PLAN)" \
+	  $(foreach p,$(J),-J $(p)) $(if $(CONFIRM),--confirm $(CONFIRM)) $(RUN_ARGS)
+
+local-lab: ## Local VMs for smoke tests (Lima): make local-lab [ACTION=up|down|status] [N=3] [ENGINE=postgres] [HA=patroni]
+	N=$(or $(N),3) ENGINE=$(or $(ENGINE),postgres) HA=$(or $(HA),patroni) local/scripts/local-lab.sh $(or $(ACTION),up)
 
 suite: validate-config ## Run a suite file N times, then compare: make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]
 	@[ -n "$(SUITE)" ] || { echo "usage: make suite SUITE=benchmark/suites/<file>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes]"; exit 1; }
@@ -150,8 +158,8 @@ suite: validate-config ## Run a suite file N times, then compare: make suite SUI
 compare: ## Compare runs: make compare SUITE_DIR=benchmark/results/suites/<id> | RUNS="run-a run-b ..."
 	@python3 -I benchmark/report/compare.py $(if $(SUITE_DIR),--suite $(SUITE_DIR)) $(if $(RUNS),--runs $(RUNS))
 
-screenshots: ## Capture every Grafana panel for a run: make screenshots [RUN=<run_id>]
-	python3 -I benchmark/runner/screenshots.py $(if $(RUN),--run $(RUN))
+screenshots: ## Capture Grafana panels for a run: make screenshots [RUN=<run_id>] [ONLY="TPS|latency|lag"]
+	python3 -I benchmark/runner/screenshots.py $(if $(RUN),--run $(RUN)) $(if $(ONLY),--only "$(ONLY)")
 
 pdf: ## Report PDF of a run into reports/<db>/<ha>/<scenario>/ (run make screenshots first): make pdf [RUN=<run_id>]
 	python3 -I benchmark/report/pdf.py $(if $(RUN),--run $(RUN))

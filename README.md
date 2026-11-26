@@ -68,7 +68,7 @@ make ha && make topology
 
 make jmeter-install
 make benchmark SCENARIO=mixed-workload
-make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate]
+make failover CONFIRM=yes [FAULT=stop-db|kill-db|isolate|freeze|partition-client]
 make screenshots && make pdf                    # report into reports/<db>/<ha>/<scenario>/
 ```
 
@@ -82,16 +82,20 @@ Infrastructure  make plan-host | provision | configure-exporters | collect-info
 Monitoring      make targets | monitoring | monitoring-stop | monitoring-status | metrics-check
 Network         make mesh-check | network-check | network-matrix [IPERF=1]
 HA              make ha | topology | switchover [NEW_PRIMARY=] | promote [NEW_PRIMARY=] [FORCE=1] | recover NODE=
-Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem|degrade [ACTION=restore] CONFIRM=yes
+Faults          make fault NODE= FAULT=stop-db|kill-db|isolate|netem|degrade|freeze|slow-disk|partition-client [ACTION=restore] CONFIRM=yes
 Benchmark       make benchmark SCENARIO= [ENDPOINT=ha|primary|<node>] [J="k=v ..."] | failover CONFIRM=yes [FAULT=]
+Chaos           make chaos SCENARIO=<s> PLAN="180:kill-db 360:freeze/60@<node>" CONFIRM=yes
+Local VMs       make local-lab [ACTION=up|down|status] [N=3]   then export LAB_CONFIG_DIR=local/lab-vms/config
 Suites          make suite SUITE=benchmark/suites/<f>.yml [REPEAT=n] [REPORTS=1] [CONFIRM=yes] | compare RUNS="run-a run-b"
 Reports         make report | screenshots | pdf [RUN=<run_id>] | manual
 Teardown        make destroy [DATA=1]
 Development     make lint | scenarios | dashboards
 ```
 
-- Scenarios: `baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`, `failover-test`, `network-disruption`, `wave-test`
+- Scenarios: `baseline`, `read-heavy`, `write-heavy`, `mixed-workload`, `spike-test`, `soak-test`, `failover-test`, `network-disruption`, `wave-test`, `rate-test`
+- `rate-test`: fixed request rate that does not drop when latency rises, e.g. `J="rate=50 burst_threads=200 burst_rate=170"` sends 10k requests in the 60 s burst. Keep threads >= rate x latency (s) and under `max_connections`.
 - `wave-test`: 10 min, load rises and falls (4, 16, 48 threads, a 112-thread burst at 5:00-5:30, then back down)
+- Gray failures: `freeze` (database hung by SIGSTOP), `slow-disk` (`-e disk_rate=1M -e disk_iops=50`), `partition-client` (clients lose the node, nodes still see each other). Every fault starts on the node 3 s after injection returns and records whether it was really active.
 - `degrade` fault: the node stays up but barely works (stress-ng on CPU, disk and memory, plus netem, default `delay 300ms 30ms loss 10%`). Example:
   `make benchmark SCENARIO=wave-test FAULT=degrade CONFIRM=yes RUN_ARGS="--fault-node db-02 --fault-at 120 --fault-duration 240"`
 - Extra Ansible args: `make provision ARGS="--limit db-02 --diff"`

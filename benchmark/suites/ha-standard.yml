@@ -1,0 +1,33 @@
+# Standard HA test set for any deployed topology: make suite SUITE=benchmark/suites/ha-standard.yml CONFIRM=yes
+# About 75 min per repeat. Every topology you compare should run this same file.
+repeat: 3
+runs:
+  - scenario: mixed-workload
+  - name: crash-primary
+    scenario: failover-test
+    fault: kill-db
+  - name: stop-primary
+    scenario: failover-test
+    fault: stop-db
+  - name: hung-primary
+    scenario: failover-test
+    fault: freeze
+  - name: clients-lose-primary
+    scenario: failover-test
+    fault: partition-client
+  - name: nodes-lose-primary
+    scenario: failover-test
+    fault: isolate
+  - name: slow-disk-primary
+    scenario: wave-test
+    fault: slow-disk
+    args: --fault-at 120 --fault-duration 240
+  - name: degraded-primary
+    scenario: wave-test
+    fault: degrade
+    args: --fault-at 120 --fault-duration 240
+  - name: flaky-network
+    scenario: network-disruption
+  - name: fixed-rate-burst
+    scenario: rate-test
+    jmeter: {rate: 30, threads: 64, burst_threads: 150, burst_rate: 100}

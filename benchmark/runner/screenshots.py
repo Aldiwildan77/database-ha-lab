@@ -50,6 +50,7 @@ def main():
     ap.add_argument("--width", type=int, default=1200)
     ap.add_argument("--height", type=int, default=500)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--only", help="regex on panel titles, e.g. 'TPS|latency|lag|writable' (default: every panel)")
     a = ap.parse_args()
 
     results = os.path.join(ROOT, "benchmark", "results")
@@ -82,6 +83,8 @@ def main():
         name = os.path.splitext(os.path.basename(f))[0]
         os.makedirs(os.path.join(out_root, name), exist_ok=True)
         for i, p in enumerate(panels(dash), 1):
+            if a.only and not re.search(a.only, p.get("title", ""), re.I):
+                continue
             q = {"orgId": 1, "panelId": p["id"], "from": t_from, "to": t_to, "theme": "light",
                  "width": a.width, "height": a.height, **variables}
             url = f"{a.grafana}/d-solo/{dash['uid']}/x?{urllib.parse.urlencode(q)}"

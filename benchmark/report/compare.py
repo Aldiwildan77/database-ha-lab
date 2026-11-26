@@ -38,6 +38,7 @@ def load(run_id):
     r.setdefault("write_availability", (r.get("summary") or {}).get("write_availability"))
     r["_engine"] = f"{ctx.get('db_engine', 'mysql')} {ctx.get('db_version_config', '')}".strip()
     r["_fault"] = meta.get("fault") or "none"
+    r["_settings"] = json.dumps(meta.get("ha_settings") or {}, sort_keys=True)
     return r
 
 
@@ -75,17 +76,21 @@ def main():
             missing.append(rid)
             continue
         test = labels.get(rid) or "_".join(x for x in (r["scenario"], r["_fault"]) if x != "none")
-        groups.setdefault((r["_engine"], r["ha_provider"], test), []).append(r)
+        groups.setdefault((r["_engine"], r["ha_provider"], test, r["_settings"]), []).append(r)
 
-    head = ["Engine", "HA provider", "Test", "Runs"] + [m[1] for m in METRICS]
+    sets = sorted({k[3] for k in groups} - {"{}"})
+    sid = {v: f"S{i + 1}" for i, v in enumerate(sets)}
+    head = ["Engine", "HA provider", "Settings", "Test", "Runs"] + [m[1] for m in METRICS]
     lines = ["# Run comparison", "", "Median over repeats, (min-max) when repeated. Lost and consistency errors show the worst run.", "",
              "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     rows = []
-    for (eng, ha, test), rs in sorted(groups.items(), key=lambda kv: (kv[0][2], kv[0][0], kv[0][1])):
-        cells = [eng, ha, test, str(len(rs))] + [fmt([r.get(k) for r in rs], sc, dc, ag) for k, _, sc, dc, ag in METRICS]
+    for (eng, ha, test, st), rs in sorted(groups.items(), key=lambda kv: (kv[0][2], kv[0][0], kv[0][1], kv[0][3])):
+        cells = [eng, ha, sid.get(st, "-"), test, str(len(rs))] + [fmt([r.get(k) for r in rs], sc, dc, ag) for k, _, sc, dc, ag in METRICS]
         lines.append("| " + " | ".join(cells) + " |")
-        rows.append({"engine": eng, "ha_provider": ha, "test": test, "runs": [r["run_id"] for r in rs],
-                     **{col: cells[4 + i] for i, (_, col, *_rest) in enumerate(METRICS)}})
+        rows.append({"engine": eng, "ha_provider": ha, "settings": json.loads(st), "test": test, "runs": [r["run_id"] for r in rs],
+                     **{col: cells[5 + i] for i, (_, col, *_rest) in enumerate(METRICS)}})
+    if sets:
+        lines += ["", "Settings:"] + [f"- {sid[v]}: `{v}`" for v in sets]
     lines += ["", "Runs: " + ", ".join(a.runs)]
     if missing:
         lines.append("Without results (failed or interrupted): " + ", ".join(missing))

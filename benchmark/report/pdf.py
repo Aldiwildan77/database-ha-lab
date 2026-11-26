@@ -133,7 +133,7 @@ def jmeter_html(meta):
 def report_config():
     try:
         import yaml
-        cfg = yaml.safe_load(open(os.path.join(ROOT, "config", "benchmark.yml"))) or {}
+        cfg = yaml.safe_load(open(os.path.join(ROOT, os.environ.get("LAB_CONFIG_DIR", "config"), "benchmark.yml"))) or {}
     except (ImportError, OSError):
         cfg = {}
     return {"author": "", "organization": "", "location": "", "redact_addresses": True, **(cfg.get("report") or {})}
@@ -204,7 +204,10 @@ def main():
 
     sections = ["<h1>1. Summary</h1>" + kpis(res, meta) + scenario_html(meta, ctx).replace("<h1>1. Scenario</h1>", "<h2>Scenario</h2>"),
                 jmeter_html(meta),
-                "<h1>3. Results</h1>" + md(re.sub(r"\A# .*\n", "", report))]
+                "<h1>3. Results</h1>" + (f"<figure><img src='file://{os.path.join(rd, 'timeline.svg')}'><figcaption><b>Timeline.</b> "
+                                         "Transactions per second, p99 latency, fault window and events.</figcaption></figure>"
+                                         if os.path.exists(os.path.join(rd, "timeline.svg")) else "")
+                + md(re.sub(r"\A# .*\n", "", report))]
     titles, panel = {}, {}
     idx = os.path.join(shots, "index.md")
     if os.path.exists(idx):

@@ -7,4 +7,3 @@
   delegate_to: "{{ old_primary }}"
   run_once: true
   when: failover_mode == 'switchover' and (fo_new_primary | default('')) == ''
-
